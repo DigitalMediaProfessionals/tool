@@ -2535,8 +2535,8 @@ result_normal = r"""  + network.get_final_output(tensor);
 table_header = r"""
 \section FPGA Mapping summary table
 
-| ID | Layers | Type | Dim In | Dim Out | Param | Mem |
-| :- | :- | :-: | :-: | :-: | :-: | :-: |
+| ID | Layers | Type | Dim In | Dim Out | Param | Mem | No. MUL | No. ADD |
+| :- | :- | :- | :- | :- | :- | -: | -: | -: |
 """
 
 def output_page(of, network_name, gengraph, fpga_net):
@@ -2548,28 +2548,73 @@ def output_page(of, network_name, gengraph, fpga_net):
             of.write('  + network.get_final_output(tensor, {0});\n'.format(i))
             of.write('  + will return the result of {0}\n'.format(layer.node_in._name))
         of.write('  + where tensor is a vector of floats, allocated in the network function')
+    total_mul_ops = 0
+    total_add_ops = 0
     of.write(table_header)
     for n, layer in enumerate(fpga_net._layer):
-        of.write('| {0} | FPGA-Layer | CONV | {1} | {2} | - | - |\n'.format(
+        of.write('| {0} | FPGA-Layer | {1} | {2} | {3} | - | - | - | - |\n'.format(
                  n,
+                 str(layer.type),
                  str(layer.node_in._input_dim),
                  str(layer.node_out._output_dim)))
         for i, run in enumerate(layer.run):
             if run.conv is not None:
-                of.write('| {0}-{1} | {2} | {3} | {4} | {5} | - | {6} |\n'.format(
+                c = run.conv._input_dim[2]
+                d = run.conv._output_dim
+                k = run.conv._param.kernel_size
+                if run.conv._param.group <= 1:
+                    mul_ops = d[0] * d[1] * k[0] * k[1] * c * d[2]
+                else:
+                    mul_ops = d[0] * d[1] * k[0] * k[1] * c
+                add_ops = mul_ops
+                total_mul_ops += mul_ops
+                total_add_ops += add_ops
+                of.write('| {0}-{1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} | {9} |\n'.format(
                          n, i,
                          run.conv._name,
                          str(run.conv._type),
                          str(run.conv._input_dim),
                          str(run.conv._output_dim),
-                         fpga_layer.get_weight_size(run.conv, fpga_net.quantization)))
+                         str(k),
+                         fpga_layer.get_weight_size(run.conv, fpga_net.quantization),
+                         mul_ops, add_ops))
             if run.pool is not None:
-                of.write('| {0}-{1} | {2} | {3} | {4} | {5} | - | - |\n'.format(
+                d = run.pool._output_dim
+                k = run.pool._param.kernel_size
+                if str(run.pool._type) == 'UpSampling':
+                    mul_ops = 0
+                    add_ops = 0
+                elif run.pool._param.pool == 0: #max pooling
+                    mul_ops = 0
+                    add_ops = d[0] * d[1] * d[2] * (k[0] * k[1] - 1)
+                else: # avg pooling
+                    mul_ops = d[0] * d[1] * d[2]
+                    add_ops = d[0] * d[1] * d[2] * (k[0] * k[1] - 1)
+                total_mul_ops += mul_ops
+                total_add_ops += add_ops
+                of.write('| {0}-{1} | {2} | {3} | {4} | {5} | {6} | - | {7} | {8} |\n'.format(
                          n, i,
                          run.pool._name,
                          str(run.pool._type),
                          str(run.pool._input_dim),
-                         str(run.pool._output_dim)))
+                         str(run.pool._output_dim),
+                         str(k),
+                         mul_ops, add_ops))
+        if layer.type is fpga_layer.LayerType.InnerProduct:
+            c = layer.node_in._input_dim
+            d = layer.node_in._output_dim
+            mul_ops = c[-1] * d[-1]
+            add_ops = mul_ops
+            total_mul_ops += mul_ops
+            total_add_ops += add_ops
+            of.write('| {0}-0 | {1} | {2} | {3} | {4} | - | {5} | {6} | {7} |\n'.format(
+                     n, layer.node_in._name,
+                     str(layer.node_in._type),
+                     str(layer.node_in._input_dim),
+                     str(layer.node_in._output_dim),
+                     fpga_layer.get_fc_weight_size(layer.node_in),
+                     mul_ops, add_ops))
+    of.write('| SUM | - | - | - | - | - | - | {0} | {1} |\n'.format(total_mul_ops, total_add_ops))
     of.write('\n')
     if gengraph:
         of.write('\\section Graph\n')
