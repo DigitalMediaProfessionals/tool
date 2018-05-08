@@ -60,7 +60,7 @@ def get_weights(netweight, layer_name, need_flip, num):
             weights.append(np.zeros((num_out)))
     return weights
 
-def parse_keras_network(network, network_data):
+def parse_keras_network2(network, net_def, netweight, need_flip = False):
     type_map = {
         'Conv2D': NodeType.Convolution,
         'DepthwiseConv2D': NodeType.Convolution,
@@ -78,32 +78,7 @@ def parse_keras_network(network, network_data):
         'Flatten': NodeType.Flatten,
         'Reshape': NodeType.Reshape,
     }
-
-    logging.info('Parsing Keras network.')
-
-    try:
-        keras_net = h5py.File(network_data, 'r')
-    except:
-        logging.exception('Exception occurred while opening Input network')
-        raise
-        
-    version = keras_net.attrs['keras_version'].decode('utf-8')
-    major_version = int(version[:version.find('.')])
-    if major_version < 2:
-        logging.error('Keras version (< 2.0.0) not supported.')
-        raise cnn_exception.ParseError('Unsupported Keras version')
-    backend = keras_net.attrs['backend'].decode('utf-8')
-    if backend == 'theano':
-        need_flip = True
-    elif backend == 'tensorflow':
-        need_flip = False
-        network.tensorflow_backend = True
-    else:
-        logging.error('Keras backend not supported.')
-        raise cnn_exception.ParseError('Unsupported Keras backend')
-
-    netdef = json.loads(keras_net.attrs['model_config'])
-    netweight = keras_net['model_weights']
+    netdef = json.loads(net_def)
     is_sequential = (netdef['class_name'] == 'Sequential')
     if type(netdef['config']) is list:
         layers = netdef['config']
@@ -168,13 +143,16 @@ def parse_keras_network(network, network_data):
             top_map[layer_name] = up_node
             continue
         elif layer_type == 'BatchNormalization':
-            weights = get_weights(netweight, layer_name, need_flip, 4)
+            if netweight is not None:
+                weights = get_weights(netweight, layer_name, need_flip, 4)
             node = cnn_layer.LayerNode(layer_name, NodeType.BatchNorm)
             up_node.set_bn_node(node)
-            node.set_mean_var(weights[2], weights[3])
+            if netweight is not None:
+                node.set_mean_var(weights[2], weights[3])
             node = cnn_layer.LayerNode(layer_name, NodeType.Scale)
             up_node.set_scale_node(node)
-            node.set_weight_bias(weights[0], weights[1])
+            if netweight is not None:
+                node.set_weight_bias(weights[0], weights[1])
             top_map[layer_name] = up_node
             continue
         elif layer_type == 'ZeroPadding2D':
@@ -256,8 +234,9 @@ def parse_keras_network(network, network_data):
             node.set_param(param)
             if config['activation'] != 'linear':
                 set_inplace_node(node, config)
-            weights = get_weights(netweight, layer_name, need_flip, 2)
-            node.set_weight_bias(weights[0], weights[1])
+            if netweight is not None:
+                weights = get_weights(netweight, layer_name, need_flip, 2)
+                node.set_weight_bias(weights[0], weights[1])
         elif node_type == NodeType.Pooling:
             param = cnn_layer.NodeParam()
             if (layer_type == 'MaxPooling2D' or
@@ -284,8 +263,9 @@ def parse_keras_network(network, network_data):
             node.set_param(param)
             if config['activation'] != 'linear':
                 set_inplace_node(node, config)
-            weights = get_weights(netweight, layer_name, need_flip, 2)
-            node.set_weight_bias(weights[0], weights[1])
+            if netweight is not None:
+                weights = get_weights(netweight, layer_name, need_flip, 2)
+                node.set_weight_bias(weights[0], weights[1])
         elif node_type == NodeType.Reshape:
             param = cnn_layer.NodeParam()
             param.reshape_param = tuple(config['target_shape'])
@@ -319,3 +299,30 @@ def parse_keras_network(network, network_data):
             node.set_param(param)
     network.set_output_node(node)
 
+def parse_keras_network(network, network_data):
+    logging.info('Parsing Keras network.')
+
+    try:
+        keras_net = h5py.File(network_data, 'r')
+    except:
+        logging.exception('Exception occurred while opening Input network')
+        raise
+        
+    version = keras_net.attrs['keras_version'].decode('utf-8')
+    major_version = int(version[:version.find('.')])
+    if major_version < 2:
+        logging.error('Keras version (< 2.0.0) not supported.')
+        raise cnn_exception.ParseError('Unsupported Keras version')
+    backend = keras_net.attrs['backend'].decode('utf-8')
+    if backend == 'theano':
+        need_flip = True
+    elif backend == 'tensorflow':
+        need_flip = False
+        network.tensorflow_backend = True
+    else:
+        logging.error('Keras backend not supported.')
+        raise cnn_exception.ParseError('Unsupported Keras backend')
+
+    netdef = keras_net.attrs['model_config']
+    netweight = keras_net['model_weights']
+    parse_keras_network2(network, netdef, netweight, need_flip)

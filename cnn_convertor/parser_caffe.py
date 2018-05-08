@@ -23,11 +23,7 @@ def get_tuple(param):
     except TypeError:
         return (param, param)
 
-def parse_caffe_def(
-    network: cnn_layer.Network,
-    network_def: str
-):
-    logging.info('Parsing Caffe network definitions.')
+def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
     type_map = {
         'Convolution': NodeType.Convolution,
         'InnerProduct': NodeType.InnerProduct,
@@ -49,8 +45,7 @@ def parse_caffe_def(
 
     caffe_net = caffe_pb2.NetParameter()
     try:
-        with open(network_def, 'r') as fin:
-            text_format.Parse(fin.read(), caffe_net)
+        text_format.Parse(netdef, caffe_net)
     except:
         logging.exception('Exception occurred while parsing Input network')
         raise
@@ -151,6 +146,14 @@ def parse_caffe_def(
             node.set_param(param)
         last_node = node
     network.set_output_node(last_node)
+
+def parse_caffe_def(
+    network: cnn_layer.Network,
+    network_def: str
+):
+    logging.info('Parsing Caffe network definitions.')
+    with open(network_def, 'r') as fin:
+        parse_caffe_def2(network, fin.read())
 
 def search_caffe_layer(layers, name):
     caffe_layer = [x for x in layers if x.name == name]
