@@ -15,8 +15,8 @@ from cnn_convertor.cnn_layer import NodeType
 from enum import IntEnum, auto
 
 MAX_RUN = 32
-MAX_UNIFIED_BUFFER_SIZE = 655360 #640KB
-MEM_ALIGN = 16 #128bit
+MAX_UNIFIED_BUFFER_SIZE = 655360  # 640KB
+MEM_ALIGN = 16  # 128bit
 
 def make_align_size(size):
     r = size & (MEM_ALIGN - 1)
@@ -36,20 +36,20 @@ def calc_conv_tiles(node):
     t = 0
     while True:
         t += 1
-        tw = int(math.ceil(w / t)) + p - 1 #width of tile
+        tw = int(math.ceil(w / t)) + p - 1  # width of tile
         ow = (tw + pad[0] * 2 - p) // stride[0] + 1
         oh = (h + pad[1] * 2 - p) / stride[1] + 1
-        os = ow * oh * (8 if m > 8 else m) #output buffer size
-        ts_1c = tw * h #tile size for single channel
+        os = ow * oh * (8 if m > 8 else m)  # output buffer size
+        ts_1c = tw * h  # tile size for single channel
         ts_blk16 = ts_1c * (8 if c > 8 else c)
         ts_blk128 = (ts_blk16 >> 3) + (0 if (ts_blk16 & 0x7) == 0 else 1)
-        #Ensure size modulo 16 = 2, this to ensure 8 blocks can be read in parallel from 16 cuts in 1x1 mode
+        # Ensure size modulo 16 = 2, this to ensure 8 blocks can be read in parallel from 16 cuts in 1x1 mode
         ts_blk128 += ((2 - ts_blk128) & 0xF)
         ts_128 = ts_blk128 * c_blocks
-        #Ensure size modulo 16 = 0, this to ensure 8 blocks can be read in parallel from 16 cuts in 1x1 mode
+        # Ensure size modulo 16 = 0, this to ensure 8 blocks can be read in parallel from 16 cuts in 1x1 mode
         ts_128 += ((0 - ts_128) & 0xF)
-        ts = (ts_128 << 3) #input tile size in UBUF (in float16)
-        uu = ts + os #unified buffer utilization
+        ts = (ts_128 << 3)  # input tile size in UBUF (in float16)
+        uu = ts + os  # unified buffer utilization
         if (uu * 2 <= MAX_UNIFIED_BUFFER_SIZE):
             return t
 
@@ -62,7 +62,7 @@ def calc_pool_tiles(node):
     t = 0
     while True:
         t += 1
-        #"unified buffer utilization", in case of pooling just a check that HW counters are not wrapping...
+        # "unified buffer utilization", in case of pooling just a check that HW counters are not wrapping...
         uu = (w * h * (8 if c > 8 else c)) // t
         if (uu * 2 <= MAX_UNIFIED_BUFFER_SIZE):
             return t
@@ -93,14 +93,14 @@ def merge_bn_scale(node, kernel_size, n_c, n_m):
 
 def calc_kmeans(weight):
     clusters = min(255, len(weight))
-    #scikit version
+    # scikit version
 #    from sklearn.cluster import KMeans
 #    kmeans = KMeans(n_clusters=clusters, n_init=3,
 #                    max_iter=10, tol=1e-6)
 #    labels = kmeans.fit_predict(weight.reshape(-1, 1))
 #    centers = kmeans.cluster_centers_
 
-    #opencv version
+    # opencv version
     import cv2
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_COUNT, 10, 1e-6)
     flags = cv2.KMEANS_PP_CENTERS
@@ -109,7 +109,7 @@ def calc_kmeans(weight):
                                               criteria, 3, flags)
     labels.shape = (len(labels),)
 
-    #sort the labels by frequency
+    # sort the labels by frequency
 #    freq = np.zeros(shape=(clusters,), dtype=np.uint32)
 #    for i in labels:
 #        freq[i] += 1
@@ -123,17 +123,17 @@ def calc_kmeans(weight):
 #        centers[i + 1] = sort_freq[i][2]
 #    for i, index in enumerate(labels):
 #        labels[i] = remap_table[index]
-    
-    #add 0 as the first element
+
+    # add 0 as the first element
     centers = np.insert(centers.astype(np.float16), 0, 0.0)
     for i, index in enumerate(labels):
         labels[i] = index + 1
-        
+
     return centers, labels
 
 def pack_weight(node, of, quantization):
     logging.info('Packing weight for node: %s.', node._name)
-    
+
     n_c = node._input_dim[2]
     if node._param.group > 1:
         n_c = n_c // node._param.group
@@ -142,7 +142,7 @@ def pack_weight(node, of, quantization):
 
     weight = node._weight
     bias = node._bias
-    
+
     if node._bn_node is not None or node._sc_node is not None:
         weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m)
 
@@ -233,9 +233,9 @@ def pack_weight(node, of, quantization):
     else:
         logging.exception('Encountered unsupported kernel size %d.',
                           kernel_size[0])
-        raise cnn_exception.ConvertError('Unsupported kernel size' + 
+        raise cnn_exception.ConvertError('Unsupported kernel size' +
                                          kernel_size[0])
-        
+
 def pack_fc_weight(node, conv_node, of):
     logging.info('Packing FC weight for node: %s.', node._name)
     centers, labels = calc_kmeans(node._weight)
@@ -255,11 +255,11 @@ def pack_fc_weight(node, conv_node, of):
             for n in range(m):
                 for d in range(0, c, 8):
                     e = d + 8 if d + 8 < c else c
-                    tr_index8 = index8[n,d:e,:,:].transpose(2, 1, 0)
-                    index8[n,d:e,:,:] = tr_index8.reshape(e-d, h, w)
+                    tr_index8 = index8[n, d:e, :, :].transpose(2, 1, 0)
+                    index8[n, d:e, :, :] = tr_index8.reshape(e - d, h, w)
     index8.tofile(of)
     bias16.tofile(of)
-    
+
 def get_weight_size(node, quantization):
     if node is None or node._type is not NodeType.Convolution:
         return 0
@@ -358,7 +358,7 @@ def gen_header_footer(of, name):
     of.write('        C{0}();\n'.format(name))
     of.write('        ~C{0}();\n'.format(name))
     of.write('\n\n};\n')
-        
+
 def gen_source_header(of, name, net):
     of.write('/*\n'
              '*------------------------------------------------------------\n'
@@ -494,7 +494,7 @@ def gen_source_conv(of, name, n, layer, quantization):
             if node_out._type is NodeType.UpSampling:
                 pool_enable = 4
         m = node_out._output_dim[2]
-        #adjust pad size if backend was tensorflow
+        # adjust pad size if backend was tensorflow
         if is_tensorflow:
             if run.conv is not None:
                 if ((conv_pad & 0xFF) * 2 + run.conv._input_dim[0] - p) > (run.conv._output_dim[0] - 1) * (conv_stride & 0xFF):
@@ -506,7 +506,7 @@ def gen_source_conv(of, name, n, layer, quantization):
                     pool_pad -= 1
                 if (((pool_pad & 0xFF0000) >> 16) * 2 + run.pool._input_dim[1] - run.pool._param.kernel_size[1]) > (run.pool._output_dim[1] - 1) * ((pool_stride & 0xFF00) >> 8):
                     pool_pad -= 0x10000
-        #detect if this is the case of pool node being merged into concat node
+        # detect if this is the case of pool node being merged into concat node
         if node_in != node_out and node_in not in node_out._input_nodes:
             m = node_in._output_dim[2]
         of.write('    //--------------------------------------------------\n')
@@ -638,7 +638,7 @@ def gen_source_layer(of, name, n, layer, quantization):
             else:
                 of.write('        {0},\n'.format(param))
         of.write('    };\n\n')
-    
+
     of.write('    struct fpga_layer& layer = layers[{0}];\n'.format(n))
     of.write('    layer.type = {0};\n'.format(type_map[layer.type]))
     if layer.type is LayerType.Convolution:
@@ -678,7 +678,7 @@ def gen_source_layer(of, name, n, layer, quantization):
         of.write('    output_layers[{0}] = &layer;\n'.format(output_index))
         output_index += 1
     of.write('}}//end of  Layer_{0}\n\n'.format(n))
-        
+
 class FPGARun:
     def __init__(self):
         self.conv = None
@@ -696,7 +696,7 @@ class LayerType(IntEnum):
 
     def __str__(self):
         return self.name
-    
+
 class FPGALayer:
     def __init__(self, nodes):
         self.type = LayerType.Other
@@ -706,9 +706,9 @@ class FPGALayer:
         self.output_addr_offset = 0
         self.is_output = False
         self.layer_in = []
-        
+
         concat_node = None
-        #append runs
+        # append runs
         run = FPGARun()
         for node in nodes:
             if (node._type is NodeType.Convolution or
@@ -759,7 +759,7 @@ class FPGALayer:
         if len(self.run) > 0:
             self.type = LayerType.Convolution
 
-        #determine layer parameters
+        # determine layer parameters
         topo = 0
         max_tiles = 0
         for i, run in enumerate(self.run):
@@ -781,7 +781,7 @@ class FPGALayer:
         self.tiles = max_tiles
 
 class FPGANetwork:
-    def __init__(self, net: cnn_layer.Network = None, quantization = True):
+    def __init__(self, net: cnn_layer.Network=None, quantization=True):
         self._layer = []
         self.output_layer = []
         self.num_output_layers = 0
@@ -796,14 +796,14 @@ class FPGANetwork:
             self.original_net = net
             self.custom_layer_config = net._custom_layer
             self.convert_network(net)
-    
+
     def convert_network(self, net: cnn_layer.Network) -> None:
         tl = net._traverse_list
         converted_node = []
         layer_start_index = -1
         end_index = len(tl)
         index = 0
-        
+
         while index < end_index:
             ignore = False
             node = tl[index]
@@ -815,7 +815,7 @@ class FPGANetwork:
                 node._type is NodeType.LRN):
                 pass
             elif node._type is NodeType.Pooling:
-                #Test if the pool node can merge with previous convolution node
+                # Test if the pool node can merge with previous convolution node
                 if (prev_node_type == NodeType.Convolution and
                     node._param.pool == 0 and
                     calc_conv_tiles(tl[index - 1]) == 1 and
@@ -851,11 +851,11 @@ class FPGANetwork:
                 node._output_size *= 2
             else:
                 ignore = True
-            
+
             if (len(converted_node) > 0 and
                 not set(node._input_nodes).issubset(set(converted_node))):
                 ignore = True
-                
+
             if layer_start_index != -1:
                 layer = FPGALayer(tl[layer_start_index:index])
                 self._layer.append(layer)
@@ -863,28 +863,28 @@ class FPGANetwork:
             if not ignore:
                 converted_node.append(node)
                 layer_start_index = index
-            
+
             index += 1
-            #handle branch, try to merge simple braches into single layer
+            # handle branch, try to merge simple braches into single layer
             can_merge = True
             while len(node._output_nodes) > 1 and can_merge:
                 if layer_start_index != -1:
                     layer = FPGALayer(tl[layer_start_index:index])
                     self._layer.append(layer)
                     layer_start_index = -1
-                #find concat node index
+                # find concat node index
                 concat_index = index
-                #stop at concat node or another branch node
+                # stop at concat node or another branch node
                 while (tl[concat_index]._type != NodeType.Concat and
                        len(tl[concat_index]._output_nodes) == 1):
                     concat_index += 1
-                #test if find a concat node, if found another branch node,
-                #this is not a simple branch
+                # test if find a concat node, if found another branch node,
+                # this is not a simple branch
                 if (tl[concat_index]._type == NodeType.Concat and
                     tl[concat_index]._param.axis ==
                     len(tl[concat_index]._output_dim) - 1):
-                    #make sure all branching paths are merged to this node
-                    #and run depth of each path <= 2
+                    # make sure all branching paths are merged to this node
+                    # and run depth of each path <= 2
                     for node_out in node._output_nodes:
                         run_depth = 0
                         while run_depth < 3 and node_out != tl[concat_index]:
@@ -902,15 +902,15 @@ class FPGANetwork:
                         if run_depth > 2:
                             can_merge = False
                             break
-                    #test if all channels of input nodes are dividable by 8
+                    # test if all channels of input nodes are dividable by 8
                     if can_merge:
                         for node_in in tl[concat_index]._input_nodes:
                             if node_in._output_dim[2] % 8 != 0:
                                 can_merge = False
                                 break
                     if can_merge:
-                        #handle specil case: pool node immediately after
-                        #the concat node can be merge into the same layer
+                        # handle specil case: pool node immediately after
+                        # the concat node can be merge into the same layer
                         node_next = tl[concat_index + 1]
                         if (node_next._type is NodeType.Pooling and
                             node_next._param.pool == 0 and
@@ -925,11 +925,11 @@ class FPGANetwork:
                 else:
                     break
 
-        #append the last layer
+        # append the last layer
         if layer_start_index != -1:
             layer = FPGALayer(tl[layer_start_index:index])
             self._layer.append(layer)
-        
+
         if self._layer[-1].node_out is net._traverse_list[-1]:
             self._layer[-1].is_output = True
         else:
@@ -948,21 +948,21 @@ class FPGANetwork:
                                 break
                     if not out_node_reached:
                         output_nodes.append(node_in)
-            
+
         self.connect_layers()
 
-        #remove unnecessary layers
+        # remove unnecessary layers
         for layer in self._layer[:]:
             if layer.type is LayerType.Input:
                 self._layer.remove(layer)
-    
+
     def connect_layers(self):
         """Set layer output addresses."""
         logging.info('Converted layer info')
         logging.info("{:22s} {:22s} {:12s} {:5s} {:18s} {:8s} {:s}".format(
             'Input Node', 'Output Node', 'Node Type', 'Range',
             'Output Dimension', 'Addr', 'Size'))
-        
+
         class LayerLiveRange:
             def __init__(self, layer, index):
                 self.layer = layer
@@ -993,18 +993,18 @@ class FPGANetwork:
             if lr.layer.is_output:
                 lr.death_index = len(self._layer) - 1
             live_ranges.append(lr)
-        
-        #handle concat layer
+
+        # handle concat layer
         for index, lr in enumerate(live_ranges):
             if lr.layer.type is LayerType.Concatenate:
                 for prev_lr in live_ranges[:index]:
                     if prev_lr.layer.node_out in lr.layer.node_in._input_nodes:
                         prev_lr.output_concat_lr = lr
                         prev_lr.death_index = lr.death_index
-        
+
         current_live_ranges = []
         allocated_size = 0
-        
+
         for index, lr in enumerate(live_ranges):
             necessary_size = make_align_size(lr.layer.node_out._output_size)
             if lr.output_concat_lr:
@@ -1021,13 +1021,13 @@ class FPGANetwork:
                     necessary_size = make_align_size(
                             lr.output_concat_lr.layer.node_out._output_size)
 
-            #update current live ranges
+            # update current live ranges
             for clr in current_live_ranges[:]:
                 if clr.death_index < index:
                     current_live_ranges.remove(clr)
-            
+
             if not lr.allocated:
-                #find if can re-use empty spaces in current live ranges
+                # find if can re-use empty spaces in current live ranges
                 layer_allocated = False
                 current_offset = 0
                 for i, clr in enumerate(current_live_ranges):
@@ -1045,19 +1045,19 @@ class FPGANetwork:
                                     clr.output_concat_lr.layer.node_out._output_size)
                         current_offset = (clr.layer.output_addr_offset +
                                           increment_size)
-                
-                #if not, put it in the end of current buffer
+
+                # if not, put it in the end of current buffer
                 if not layer_allocated:
                     current_live_ranges.append(lr)
                     lr.layer.output_addr_offset = current_offset
                     if current_offset + necessary_size > allocated_size:
                         allocated_size = current_offset + necessary_size
-                
+
                 lr.allocated = True
                 if lr.output_concat_lr and not lr.output_concat_lr.allocated:
                     lr.output_concat_lr.allocated = True
                     lr.output_concat_lr.layer.output_addr_offset = lr.layer.output_addr_offset
-            
+
             logging.info("{:22s} {:22s} {:12s} {:02d} {:02d} {:18s} {:<8d} {:d}{:s}".format(
                 lr.layer.node_in._name, lr.layer.node_out._name,
                 str(lr.layer.type),
@@ -1075,7 +1075,7 @@ class FPGANetwork:
         for n, layer in enumerate(self._layer):
             gen_header_layer(of, n, layer, self.quantization)
         gen_header_footer(of, name)
-    
+
     def output_source(self, of, name) -> None:
         global weight_offset
         global output_index
@@ -1090,7 +1090,7 @@ class FPGANetwork:
         gen_source_header(of, name, self)
         for n, layer in enumerate(self._layer):
             gen_source_layer(of, name, n, layer, self.quantization)
-    
+
     def output_weights(self, of) -> None:
         prev_node = None
         for layer in self._layer:
@@ -1102,7 +1102,7 @@ class FPGANetwork:
             elif layer.type is LayerType.InnerProduct:
                 pack_fc_weight(layer.node_in, prev_node, of)
             prev_node = layer.node_out
-    
+
     def output_network(self, output_folder: str, network_name: str,
                        gensrc: bool, gendoc: bool, gengraph: bool,
                        graphviz_path: str) -> None:

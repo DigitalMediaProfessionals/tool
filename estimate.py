@@ -1,11 +1,59 @@
+#!/usr/bin/python3.6
 # -*- coding: utf-8 -*-
 """
-Created on Tue May  8 11:22:16 2018
-
-@author: zonghong.lyu
+Estimates network performance from data stored in DB.
 """
+import sys
+if (sys.version_info.major < 3 or
+        (sys.version_info.major == 3 and sys.version_info.minor < 6)):
+    raise ValueError("python3.6 or greater is required")
+
+import argparse
+import logging
+import os
 
 from cnn_convertor import fpga_layer, cnn_layer, parser_caffe, parser_keras
+from cnn_convertor.fpga_layer import LayerType
+
+
+class Result(object):
+    @property
+    def time_ms(self):
+        raise NotImplementedError()
+
+
+class ResultZero(Result):
+    @property
+    def time_ms(self):
+        return 0.0
+
+
+class ResultUnknown(Result):
+    @property
+    def time_ms(self):
+        return None
+
+
+def estimate_conv(layer):
+    """Estimates performance of convolutional layer.
+    """
+    result = ResultUnknown()
+    return result
+
+
+def estimate_fc(layer):
+    """Estimates performance of fully connected layer.
+    """
+    result = ResultUnknown()
+    return result
+
+
+def estimate_sm(layer):
+    """Estimates performance of softmax layer.
+    """
+    result = ResultUnknown()
+    return result
+
 
 def estimate_network(net_def: str, net_type):
     network = cnn_layer.Network({})
@@ -16,20 +64,46 @@ def estimate_network(net_def: str, net_type):
     network.build_traverse_list()
     network.calc_inout_sizes()
     fpga_net = fpga_layer.FPGANetwork(network, False)
-    # TODO: implement estimation of each layer, return the converted net for now
-    return fpga_net
 
-if __name__ == "__main__":
-    import os
-    import argparse
-    parser = argparse.ArgumentParser(description="DNN execution time on FPGA estimate test")
+    results = []
+
+    for layer in fpga_net._layer:
+        if layer.type is LayerType.Convolution:
+            logging.debug("%s: Convolution", layer)
+            result = estimate_conv(layer)
+        elif layer.type is LayerType.InnerProduct:
+            logging.debug("%s: Fully Connected", layer)
+            result = estimate_fc(layer)
+        elif layer.type is LayerType.Input:
+            logging.debug("%s: Input: time is 0", layer)
+            result = ResultZero()
+        elif layer.type is LayerType.Concatenate:
+            logging.debug("%s: Concatenate: time is 0", layer)
+            result = ResultZero()
+        elif layer.type is LayerType.Flatten:
+            logging.debug("%s: Flatten: time is 0", layer)
+            result = ResultZero()
+        elif layer.type is LayerType.SoftMax:
+            logging.debug("%s: SoftMax", layer)
+            result = estimate_sm(layer)
+        else:
+            logging.debug("%s: Custom", layer)
+            result = ResultUnknown()
+        results.append((layer, result))
+
+    return results
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="DNN execution time on FPGA estimate test")
     parser.add_argument("NETWORK_DEF", type=str, help="network definition")
     args = parser.parse_args()
     path = os.path.abspath(args.NETWORK_DEF)
-    root, ext = os.path.splitext(path)
+    _root, ext = os.path.splitext(path)
     with open(path, "r") as of:
         net_def = of.read()
-    # guess network framework
+    # Guess network framework
     if ext == "json":
         net_type = "KERAS"
     elif ext == ".prototxt":
@@ -40,6 +114,10 @@ if __name__ == "__main__":
             net_type = "KERAS"
         else:
             net_type = "CAFFE"
-    net = estimate_network(net_def, net_type)
-    import pdb
-    pdb.set_trace()
+    results = estimate_network(net_def, net_type)
+    print(results)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    main()
