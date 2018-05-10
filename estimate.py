@@ -18,7 +18,7 @@ from cnn_convertor.fpga_layer import LayerType
 
 def patch_path():
     head = __file__
-    for i in range(2):
+    for _i in range(2):
         head, _tail = os.path.split(head)
         if not len(head):
             head = ".."
@@ -49,37 +49,91 @@ class ResultUnknown(Result):
         return None
 
 
-class ResultConv(Result):
+class ResultConf(Result):
     def __init__(self):
-        super(ResultConv, self).__init__()
-        self._time_ms = 0.0
+        super(ResultConf, self).__init__()
+        self._time_ms = None
+        self._succeeded = None
+        self._error_message = None
+        self._ts_last_run = None
 
     @property
     def time_ms(self):
         return self._time_ms
 
+    @time_ms.setter
+    def time_ms(self, value):
+        self._time_ms = value
 
-def estimate_conv(layer):
+    @property
+    def succeeded(self):
+        return self._succeeded
+
+    @succeeded.setter
+    def succeeded(self, value):
+        self._succeeded = value
+
+    @property
+    def error_message(self):
+        return self._error_message
+
+    @error_message.setter
+    def error_message(self, value):
+        self._error_message = value
+
+    @property
+    def ts_last_run(self):
+        return self._ts_last_run
+
+    @ts_last_run.setter
+    def ts_last_run(self, value):
+        self._ts_last_run = value
+
+
+class ResultConv(ResultConf):
+    pass
+
+
+class ResultFC(ResultConf):
+    pass
+
+
+class ResultSM(ResultConf):
+    pass
+
+
+def estimate_conv(layer, cache):
     """Estimates performance of convolutional layer.
     """
     result = ResultConv()
 
-    # TODO: continue from here.
+    conf = ConvConf()
+    conf.w = layer.node_in._input_dim[0]
+    conf.h = layer.node_in._input_dim[1]
+    conf.z = 1
+    conf.c = layer.node_in._input_dim[2]
+    # TODO: confinue from here.
+
+    time_ms = cache.estimate_time_ms(conf)
+    result.time_ms = time_ms
+    result.succeeded = conf.succeeded
+    result.error_message = conf.error_message
+    result.ts_last_run = conf.ts_last_run
 
     return result
 
 
-def estimate_fc(layer):
+def estimate_fc(layer, cache):
     """Estimates performance of fully connected layer.
     """
-    result = ResultUnknown()
+    result = ResultFC()
     return result
 
 
-def estimate_sm(layer):
+def estimate_sm(layer, cache):
     """Estimates performance of softmax layer.
     """
-    result = ResultUnknown()
+    result = ResultSM()
     return result
 
 
@@ -95,13 +149,15 @@ def estimate_network(net_def: str, net_type):
 
     results = []
 
+    cache = PerfCache()
+
     for layer in fpga_net._layer:
         if layer.type is LayerType.Convolution:
             logging.debug("%s: Convolution", layer)
-            result = estimate_conv(layer)
+            result = estimate_conv(layer, cache)
         elif layer.type is LayerType.InnerProduct:
             logging.debug("%s: Fully Connected", layer)
-            result = estimate_fc(layer)
+            result = estimate_fc(layer, cache)
         elif layer.type is LayerType.Input:
             logging.debug("%s: Input: time is 0", layer)
             result = ResultZero()
@@ -113,7 +169,7 @@ def estimate_network(net_def: str, net_type):
             result = ResultZero()
         elif layer.type is LayerType.SoftMax:
             logging.debug("%s: SoftMax", layer)
-            result = estimate_sm(layer)
+            result = estimate_sm(layer, cache)
         else:
             logging.debug("%s: Custom", layer)
             result = ResultUnknown()
