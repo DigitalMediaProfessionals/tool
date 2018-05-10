@@ -333,8 +333,19 @@ def main():
         else:
             net_type = "CAFFE"
     results = estimate_network(net_def, net_type)
+    total_time = 0.0
+    n_estimated = 0
     for res in results:
         print(res.time_ms)
+        if res.time_ms is not None:
+            total_time += res.time_ms
+            n_estimated += 1
+    print("Estimated for %d layers out of %d (%.0f%%)" %
+          (n_estimated, len(results), 100.0 * n_estimated / len(results)))
+    if n_estimated == len(results):
+        print("Time is %.1f msec" % total_time)
+    else:
+        print("Time is greater than %.1f msec" % total_time)
 
 
 if __name__ == "__main__":
