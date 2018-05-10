@@ -272,6 +272,8 @@ def estimate_sm(layer, cache):
 
 
 def estimate_network(net_def: str, net_type):
+    quantization = True
+
     network = cnn_layer.Network({})
     if net_type == 'CAFFE':
         parser_caffe.parse_caffe_def2(network, net_def)
@@ -279,7 +281,7 @@ def estimate_network(net_def: str, net_type):
         parser_keras.parse_keras_network2(network, net_def, None)
     network.build_traverse_list()
     network.calc_inout_sizes()
-    fpga_net = fpga_layer.FPGANetwork(network, False)
+    fpga_net = fpga_layer.FPGANetwork(network, quantization)
 
     results = []
 
