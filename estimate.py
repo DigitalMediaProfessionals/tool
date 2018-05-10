@@ -10,10 +10,12 @@ if (sys.version_info.major < 3 or
 
 import argparse
 import logging
+import numpy as np
 import os
 
 from cnn_convertor import fpga_layer, cnn_layer, parser_caffe, parser_keras
-from cnn_convertor.fpga_layer import LayerType, NodeType, get_weight_size
+from cnn_convertor.fpga_layer import \
+    LayerType, NodeType, get_weight_size, get_fc_weight_size
 
 
 def patch_path():
@@ -56,6 +58,24 @@ class ResultConf(Result):
         self._succeeded = None
         self._error_message = None
         self._ts_last_run = None
+
+    def estimate(self, cache, conf):
+        """Estimates execution time from DB cache.
+        """
+        found = False
+        if not cache.fetch_info(conf):
+            logging.debug("Record not found, adding the request")
+            cache.add_request(conf)
+        elif conf.succeeded:
+            found = True
+            time_ms = conf.time_ms
+        if not found:
+            time_ms = cache.estimate_time_ms(conf)
+
+        self.time_ms = time_ms
+        self.succeeded = conf.succeeded
+        self.error_message = conf.error_message
+        self.ts_last_run = conf.ts_last_run
 
     @property
     def time_ms(self):
@@ -107,8 +127,8 @@ def estimate_conv_run(run, layer, cache, quantization):
     treating each run as a separate layer.
     """
     result = ResultConv()
-
     conf = ConvConf()
+
     conf.topo = layer.topo
     conf.w = layer.node_in._input_dim[0]
     conf.h = layer.node_in._input_dim[1]
@@ -175,20 +195,7 @@ def estimate_conv_run(run, layer, cache, quantization):
     if node_in != node_out and node_in not in node_out._input_nodes:
         conf.m = node_in._output_dim[2]
 
-    found = False
-    if not cache.fetch_info(conf):
-        logging.debug("Record not found, adding the request")
-        cache.add_request(conf)
-    elif conf.succeeded:
-        found = True
-        time_ms = conf.time_ms
-    if not found:
-        time_ms = cache.estimate_time_ms(conf)
-
-    result.time_ms = time_ms
-    result.succeeded = conf.succeeded
-    result.error_message = conf.error_message
-    result.ts_last_run = conf.ts_last_run
+    result.estimate(cache, conf)
 
     return result
 
@@ -205,7 +212,40 @@ def estimate_conv(layer, cache, quantization):
 def estimate_fc(layer, cache, quantization):
     """Estimates performance of fully connected layer.
     """
+    if not quantization:
+        logging.warning(
+            "Treating non-quantized weight as quantized in execution time "
+            "estimation for Fully Connected layer")
+
     result = ResultFC()
+    conf = FCConf()
+
+    node = layer.node_in
+    if len(node._input_dim) == 3:
+        w, h, c = node._input_dim
+    elif len(node._input_dim) == 1:
+        w, h, c = 1, 1, node._input_dim[0]
+    m = node._output_dim[0]
+    actfunc = 0
+    actfunc_param = 0
+    if node._act_node:
+        if node._act_node._type == NodeType.ReLU:
+            actfunc = 0x10
+            if node._act_node._param.relu_param != 0.0:
+                actfunc = 0x30
+                actfunc_param = node._act_node._param.relu_param
+        else:
+            actfunc = 0x20
+
+    conf.input_size = w * h * c
+    conf.output_size = m
+    conf.param_fmt = 1
+    conf.actfunc = actfunc
+    conf.actfunc_param = actfunc_param
+    conf.weights_size = get_fc_weight_size(node)
+
+    result.estimate(cache, conf)
+
     return result,
 
 
@@ -213,6 +253,21 @@ def estimate_sm(layer, cache):
     """Estimates performance of softmax layer.
     """
     result = ResultSM()
+    conf = SMConf()
+
+    axis = layer.node_in._param.axis
+    if axis < 0:
+        axis = len(layer.node_in._input_dim) + axis
+    conf.size = layer.node_in._input_dim[axis]
+
+    result.estimate(cache, conf)
+
+    # Adjust time as DB stores only timing
+    # for single dimension softmax application
+    if result.time_ms is not None:
+        result.time_ms *= (np.prod(layer.node_in._input_dim) /
+                           layer.node_in._input_dim[axis])
+
     return result,
 
 
