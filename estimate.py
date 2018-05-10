@@ -175,7 +175,16 @@ def estimate_conv_run(run, layer, cache, quantization):
     if node_in != node_out and node_in not in node_out._input_nodes:
         conf.m = node_in._output_dim[2]
 
-    time_ms = cache.estimate_time_ms(conf)
+    found = False
+    if not cache.fetch_info(conf):
+        logging.debug("Record not found, adding the request")
+        cache.add_request(conf)
+    elif conf.succeeded:
+        found = True
+        time_ms = conf.time_ms
+    if not found:
+        time_ms = cache.estimate_time_ms(conf)
+
     result.time_ms = time_ms
     result.succeeded = conf.succeeded
     result.error_message = conf.error_message
