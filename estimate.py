@@ -327,7 +327,7 @@ def main():
     elif ext == ".prototxt":
         net_type = "CAFFE"
     else:
-        # guess from file content
+        # Guess from file content
         if net_def[0] == '{':
             net_type = "KERAS"
         else:
