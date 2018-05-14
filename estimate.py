@@ -17,16 +17,18 @@ from cnn_convertor.fpga_layer import LayerType
 
 
 def patch_path():
-    thisdir = os.path.dirname(__file__)
-    if not len(thisdir):
-        thisdir = "."
-    path = "%s/../db" % thisdir
-    if path not in sys.path:
-        sys.path.insert(0, path)
+    head = __file__
+    for i in range(2):
+        head, _tail = os.path.split(head)
+        if not len(head):
+            head = ".."
+            break
+    if head not in sys.path:
+        sys.path.insert(0, head)
 
 
 patch_path()
-from cache import PerfCache, ConvConf, FCConf, SMConf
+from perf_cache import PerfCache, ConvConf, FCConf, SMConf
 
 
 class Result(object):
