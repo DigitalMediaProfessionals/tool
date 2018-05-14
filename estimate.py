@@ -19,14 +19,14 @@ from cnn_convertor.fpga_layer import \
 
 
 def patch_path():
-    head = __file__
-    for _i in range(2):
-        head, _tail = os.path.split(head)
-        if not len(head):
-            head = ".."
-            break
-    if head not in sys.path:
-        sys.path.insert(0, head)
+    thisdir = os.path.dirname(__file__)
+    if not len(thisdir) or thisdir == ".":
+        path = ".."
+    else:
+        updir = os.path.dirname(thisdir)
+        path = updir if len(updir) else "."
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 
 patch_path()
