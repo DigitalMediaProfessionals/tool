@@ -16,6 +16,19 @@ from cnn_convertor import fpga_layer, cnn_layer, parser_caffe, parser_keras
 from cnn_convertor.fpga_layer import LayerType
 
 
+def patch_path():
+    thisdir = os.path.dirname(__file__)
+    if not len(thisdir):
+        thisdir = "."
+    path = "%s/../db" % thisdir
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+
+patch_path()
+from cache import PerfCache, ConvConf, FCConf, SMConf
+
+
 class Result(object):
     @property
     def time_ms(self):
@@ -34,10 +47,23 @@ class ResultUnknown(Result):
         return None
 
 
+class ResultConv(Result):
+    def __init__(self):
+        super(ResultConv, self).__init__()
+        self._time_ms = 0.0
+
+    @property
+    def time_ms(self):
+        return self._time_ms
+
+
 def estimate_conv(layer):
     """Estimates performance of convolutional layer.
     """
-    result = ResultUnknown()
+    result = ResultConv()
+
+    # TODO: continue from here.
+
     return result
 
 
