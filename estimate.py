@@ -16,7 +16,7 @@ def estimate_network(net_def: str, net_type):
     network.build_traverse_list()
     network.calc_inout_sizes()
     fpga_net = fpga_layer.FPGANetwork(network, False)
-    #TODO: implement estimation of each layer, return the converted net for now
+    # TODO: implement estimation of each layer, return the converted net for now
     return fpga_net
 
 if __name__ == "__main__":
@@ -29,15 +29,17 @@ if __name__ == "__main__":
     root, ext = os.path.splitext(path)
     with open(path, "r") as of:
         net_def = of.read()
-    #guess network framework
+    # guess network framework
     if ext == "json":
         net_type = "KERAS"
     elif ext == ".prototxt":
         net_type = "CAFFE"
     else:
-        #guess from file content
+        # guess from file content
         if net_def[0] == '{':
             net_type = "KERAS"
         else:
             net_type = "CAFFE"
-    estimate_network(net_def, net_type)
+    net = estimate_network(net_def, net_type)
+    import pdb
+    pdb.set_trace()
