@@ -351,18 +351,35 @@ def main():
     n_estimated = 0
     n_total = 0
     for group, res in results:
-        if group is not None and group.succeeded:
-            n_total += 1
-            dt = group.time_ms
-            print(dt)
-            if dt is not None:
-                total_time += dt
-                n_estimated += 1
+        if group is not None:
+            smm = 0.0
+            for r in res:
+                dt = r.time_ms
+                if dt is not None:
+                    smm += dt
+
+            if group.succeeded:
+                n_total += 1
+                dt = group.time_ms
+                print("%s (%s individually)" % (dt, smm))
+                if dt is not None:
+                    total_time += dt
+                    n_estimated += 1
+            else:
+                print("None (%s individually)" % smm)
+                for r in res:
+                    n_total += 1
+                    dt = r.time_ms
+                    if dt is not None:
+                        total_time += dt
+                        n_estimated += 1
+            for r in res:
+                print("  %.1f" % r.time_ms)
         else:
             for r in res:
                 n_total += 1
                 dt = r.time_ms
-                print(dt)
+                print("%.1f" % dt)
                 if dt is not None:
                     total_time += dt
                     n_estimated += 1
