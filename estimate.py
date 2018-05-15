@@ -1,6 +1,12 @@
 #!/usr/bin/python3.6
 # -*- coding: utf-8 -*-
 """
+------------------------------------------------------------
+ Copyright(c) 2017 by Digital Media Professionals Inc.
+ All rights reserved.
+------------------------------------------------------------
+"""
+"""
 Estimates network performance from data stored in DB.
 """
 import sys
@@ -58,6 +64,7 @@ class ResultConf(Result):
         self._succeeded = None
         self._error_message = None
         self._ts_last_run = None
+        self.conf = None
 
     def estimate(self, cache, conf):
         """Estimates execution time from DB cache.
@@ -76,6 +83,8 @@ class ResultConf(Result):
         self.succeeded = conf.succeeded
         self.error_message = conf.error_message
         self.ts_last_run = conf.ts_last_run
+
+        self.conf = conf
 
     @property
     def time_ms(self):
@@ -206,7 +215,10 @@ def estimate_conv(layer, cache, quantization):
     res = []
     for run in layer.run:
         res.append(estimate_conv_run(run, layer, cache, quantization))
-    return res
+    chain_info = None
+    if len(layer.run) > 1:
+        chain_info = cache.estimate_conv_chain(list(r.conf for r in res))
+    return chain_info, res
 
 
 def estimate_fc(layer, cache, quantization):
@@ -246,7 +258,7 @@ def estimate_fc(layer, cache, quantization):
 
     result.estimate(cache, conf)
 
-    return result,
+    return None, [result]
 
 
 def estimate_sm(layer, cache):
@@ -268,7 +280,7 @@ def estimate_sm(layer, cache):
         result.time_ms *= (np.prod(layer.node_in._input_dim) /
                            layer.node_in._input_dim[axis])
 
-    return result,
+    return None, [result]
 
 
 def estimate_network(net_def: str, net_type):
@@ -296,20 +308,20 @@ def estimate_network(net_def: str, net_type):
             res = estimate_fc(layer, cache, fpga_net.quantization)
         elif layer.type is LayerType.Input:
             logging.debug("%s: Input: time is 0", layer)
-            res = ResultZero(),
+            res = None, [ResultZero()]
         elif layer.type is LayerType.Concatenate:
             logging.debug("%s: Concatenate: time is 0", layer)
-            res = ResultZero(),
+            res = None, [ResultZero()]
         elif layer.type is LayerType.Flatten:
             logging.debug("%s: Flatten: time is 0", layer)
-            res = ResultZero(),
+            res = None, [ResultZero()]
         elif layer.type is LayerType.SoftMax:
             logging.debug("%s: SoftMax", layer)
             res = estimate_sm(layer, cache)
         else:
             logging.debug("%s: Custom", layer)
-            res = ResultUnknown(),
-        results.extend(res)
+            res = None, [ResultUnknown()]
+        results.append(res)
 
     return results
 
@@ -337,14 +349,27 @@ def main():
     results = estimate_network(net_def, net_type)
     total_time = 0.0
     n_estimated = 0
-    for res in results:
-        print(res.time_ms)
-        if res.time_ms is not None:
-            total_time += res.time_ms
-            n_estimated += 1
+    n_total = 0
+    for group, res in results:
+        if group is not None and group.succeeded:
+            n_total += 1
+            dt = group.time_ms
+            print(dt)
+            if dt is not None:
+                total_time += dt
+                n_estimated += 1
+        else:
+            for r in res:
+                n_total += 1
+                dt = r.time_ms
+                print(dt)
+                if dt is not None:
+                    total_time += dt
+                    n_estimated += 1
+
     print("Estimated for %d layers out of %d (%.0f%%)" %
-          (n_estimated, len(results), 100.0 * n_estimated / len(results)))
-    if n_estimated == len(results):
+          (n_estimated, n_total, 100.0 * n_estimated / n_total))
+    if n_estimated == n_total:
         print("Time is %.1f msec" % total_time)
     else:
         print("Time is greater than %.1f msec" % total_time)
