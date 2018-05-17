@@ -218,7 +218,7 @@ def estimate_conv(layer, cache, quantization):
     chain_info = None
     if len(layer.run) > 1:
         chain_info = cache.estimate_conv_chain(list(r.conf for r in res))
-    return chain_info, res
+    return chain_info, res, layer
 
 
 def estimate_fc(layer, cache, quantization):
@@ -258,7 +258,7 @@ def estimate_fc(layer, cache, quantization):
 
     result.estimate(cache, conf)
 
-    return None, [result]
+    return None, [result], layer
 
 
 def estimate_sm(layer, cache):
@@ -280,7 +280,7 @@ def estimate_sm(layer, cache):
         result.time_ms *= (np.prod(layer.node_in._input_dim) /
                            layer.node_in._input_dim[axis])
 
-    return None, [result]
+    return None, [result], layer
 
 
 def estimate_network(net_def: str, net_type):
@@ -308,19 +308,19 @@ def estimate_network(net_def: str, net_type):
             res = estimate_fc(layer, cache, fpga_net.quantization)
         elif layer.type is LayerType.Input:
             logging.debug("%s: Input: time is 0", layer)
-            res = None, [ResultZero()]
+            res = None, [ResultZero()], layer
         elif layer.type is LayerType.Concatenate:
             logging.debug("%s: Concatenate: time is 0", layer)
-            res = None, [ResultZero()]
+            res = None, [ResultZero()], layer
         elif layer.type is LayerType.Flatten:
             logging.debug("%s: Flatten: time is 0", layer)
-            res = None, [ResultZero()]
+            res = None, [ResultZero()], layer
         elif layer.type is LayerType.SoftMax:
             logging.debug("%s: SoftMax", layer)
             res = estimate_sm(layer, cache)
         else:
             logging.debug("%s: Custom", layer)
-            res = None, [ResultUnknown()]
+            res = None, [ResultUnknown()], layer
         results.append(res)
 
     return results
@@ -350,7 +350,7 @@ def main():
     total_time = 0.0
     n_estimated = 0
     n_total = 0
-    for group, res in results:
+    for group, res, _layer in results:
         if group is not None:
             smm = 0.0
             for r in res:
