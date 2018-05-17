@@ -94,7 +94,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
             else:
                 is_channel_first = False
             break;
-            
+
     top_map = {}
     prev_node = None
     # Handle each layer node
@@ -104,7 +104,19 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
         layer_name = config['name']
         logging.debug('Handling layer %d, Name: %s, Type %s',
                       i, layer_name, layer_type)
-        
+
+        # if the first node is not input node, create a dummy input node
+        if i == 0 and layer_type != 'InputLayer':
+            node = cnn_layer.LayerNode('Input', NodeType.Input, None)
+            prev_node = node
+            network.append_input_node(node)
+            shape = config['batch_input_shape']
+            if is_channel_first:
+                dim = (shape[3], shape[2], shape[1])
+            else:
+                dim = (shape[2], shape[1], shape[3])
+            node.set_input_dim(dim)
+            node.set_output_dim(dim)
         if is_sequential:
             input_nodes = prev_node
             up_node = prev_node
@@ -143,6 +155,22 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
             top_map[layer_name] = up_node
             continue
         elif layer_type == 'BatchNormalization':
+            #handle case that the up_node is not a convolution node
+            if up_node is None or up_node._type is not NodeType.Convolution:
+                up_node = cnn_layer.LayerNode(layer_name, NodeType.Convolution,
+                                              input_nodes)
+                param = cnn_layer.NodeParam()
+                #For keras, output is not set for depthwise convolution
+                #skip setting num_output and set it when calculating in_out sizes
+                param.kernel_size = (1, 1)
+                param.pad = (0, 0)
+                param.keras_padding = 'same'
+                param.stride = (1, 1)
+                param.group = 1
+                up_node.set_param(param)
+                if netweight is not None:
+                    up_node.set_weight_bias(None, None)
+                prev_node = up_node
             if netweight is not None:
                 weights = get_weights(netweight, layer_name, need_flip, 4)
             node = cnn_layer.LayerNode(layer_name, NodeType.BatchNorm)
@@ -278,9 +306,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
                 param.axis = config['concat_axis']
             if param.axis > 0:
                 param.axis -= 1
-            elif param.axis < 0:
-                param.axis = 3 + param.axis
-            if is_channel_first:
+            if is_channel_first and param.axis >= 0:
                 param.axis = 2 - param.axis
             node.set_param(param)
         elif node_type == NodeType.SoftMax:
@@ -307,7 +333,7 @@ def parse_keras_network(network, network_data):
     except:
         logging.exception('Exception occurred while opening Input network')
         raise
-        
+
     version = keras_net.attrs['keras_version'].decode('utf-8')
     major_version = int(version[:version.find('.')])
     if major_version < 2:

@@ -32,10 +32,10 @@ class NodeType(IntEnum):
     Flatten = auto()
     Reshape = auto()
     Custom = auto()
-    
+
     def __repr__(self):
         return '<%s.%s>' % (self.__class__.__name__, self.name)
-    
+
     def __str__(self):
         return self.name
 
@@ -70,12 +70,12 @@ class LayerNode:
         output_node: Union['LayerNode', List['LayerNode']] = None,
     ) -> None:
         """Construct a LayerNode
-        
+
         Note:
             The newly created node will be automatically appended to the
             output nodes of all input_node if it is not None, and also to the
             input nodes of all output_node if it is not None.
-        
+
         Args:
             name: Name of the node.
             node_type: Type of the node.
@@ -112,28 +112,30 @@ class LayerNode:
                 self._type,
                 str(self._param)
                 )
-    
+
     def set_bn_node(self, node: 'LayerNode'):
         """ Set the batched normalization node for convolution node."""
         self._bn_node = node
-    
+
     def set_scale_node(self, node: 'LayerNode'):
         """ Set the scale node for convolution node."""
         self._sc_node = node
-    
+
     def set_activation_node(self, node: 'LayerNode'):
         """ Set the activation node for convolution Node."""
         self._act_node = node
-        
+
     def set_input_dim(self, input_dim: Tuple[int]):
         self._input_dim = input_dim
 
-    def set_output_dim(self, output_dim: Tuple[int]): 
+    def set_output_dim(self, output_dim: Tuple[int]):
         self._output_dim = output_dim
         self._output_size = 2
+        if self._type is NodeType.Custom or self._type is NodeType.SoftMax:
+            self._output_size = 4
         for n in output_dim:
             self._output_size *= n
-        
+
     def set_param(self, param: NodeParam):
         if param.kernel_size == (0, 0):
             param.kernel_size = (1, 1)
@@ -145,16 +147,16 @@ class LayerNode:
         """ Set weight and bias blobs data for convolution or scale node."""
         self._weight = weight
         self._bias = bias
-    
+
     def set_mean_var(self, mean, var):
         """ Set mean and variance blobs data for BatchNorm node."""
         self._mean = mean
         self._var = var
-    
+
 class Network:
     """Represent a CNN.
     """
-    
+
     def __init__(self, custom_layer) -> None:
         """Construct an empty CNN."""
         self._input_nodes = []
@@ -162,7 +164,7 @@ class Network:
         self._debug_node = None
         self._custom_layer = custom_layer
         self.tensorflow_backend = False
-        
+
     def build_traverse_list(self) -> None:
         pending = [self._output_node]
         tlist = []
@@ -182,10 +184,10 @@ class Network:
 
     def append_input_node(self, node):
         self._input_nodes.append(node)
-    
+
     def set_output_node(self, node):
         self._output_node = node
-        
+
     def split_pool_node(self, node):
         #only handle case where kernel_size[0] and [1] are equal now
         candidates = [7, 6, 5, 4, 3, 2]
@@ -217,7 +219,7 @@ class Network:
         remain_node._input_dim = remain_dim
         remain_node.set_output_dim(node._output_dim)
         node.set_output_dim(remain_dim)
-        
+
         param = NodeParam()
         param.pool = node._param.pool
         param.kernel_size = (remain_size, remain_size)
@@ -228,10 +230,10 @@ class Network:
         node._param.stride = (split_size, split_size)
 
         self._traverse_list.insert(insert_index, remain_node)
-        
+
         if remain_size > 7:
             self.split_pool_node(remain_node)
-    
+
     def insert_flatten_node(self, node, dim):
         insert_index = self._traverse_list.index(node)
         flat_node = LayerNode(node._name + '_flatten', NodeType.Flatten)
@@ -247,7 +249,7 @@ class Network:
         flat_node.set_output_dim((size,))
         self._traverse_list.insert(insert_index, flat_node)
         return flat_node
-        
+
     def calc_inout_sizes(self):
         def get_output_xy(dim: Tuple[int],
                           param: NodeParam,
@@ -284,7 +286,7 @@ class Network:
                 w = math.floor(w)
                 h = math.floor(h)
             return w, h
-    
+
         tr_list = self._traverse_list[:]
         for node in tr_list:
             if node._type == NodeType.Input:
@@ -321,7 +323,7 @@ class Network:
                     self.split_pool_node(node)
             elif node._type == NodeType.UpSampling:
                 node.set_input_dim(dim)
-                dim = (dim[0] * node._param.kernel_size[0], 
+                dim = (dim[0] * node._param.kernel_size[0],
                        dim[1] * node._param.kernel_size[1], dim[2])
                 node.set_output_dim(dim)
             elif node._type == NodeType.Concat:
@@ -358,6 +360,6 @@ class Network:
                 node.set_output_dim(dim)
 
 # Test script
-if __name__ == '__main__':            
+if __name__ == '__main__':
     t1 = LayerNode('test1', NodeType.Convolution)
     t2 = LayerNode('test2', NodeType.ReLU, input_node = t1)
