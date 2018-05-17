@@ -142,6 +142,10 @@ def pack_weight(node, of, quantization):
 
     weight = node._weight
     bias = node._bias
+    if weight is None and bias is None:
+        weight = np.ones((n_m, n_c, kernel_size[1], kernel_size[0]), np.float32)
+        bias = np.zeros((n_m, n_c), np.float32)
+        node.set_weight_bias(weight, bias)
 
     if node._bn_node is not None or node._sc_node is not None:
         weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m)
@@ -487,7 +491,8 @@ def gen_source_conv(of, name, n, layer, quantization):
         node_out = run.conv
         if run.pool is not None:
             node_out = run.pool
-            if node_out._type is NodeType.Pooling and node_out._param.pool != 0:
+            if (node_out._type is NodeType.Pooling and node_out._param.pool != 0
+                or node_out._type is NodeType.Eltwise):
                 pool_enable = 2
                 pool_avg_param = np.float16(1.0 / (run.pool._param.kernel_size[0] * run.pool._param.kernel_size[1]))
                 pool_avg_param = pool_avg_param.data[1] << 8 | pool_avg_param.data[0]
@@ -729,7 +734,8 @@ class FPGALayer:
                     run.pool = node
                     self.run.append(run)
                     run = FPGARun()
-            elif node._type is NodeType.UpSampling:
+            elif (node._type is NodeType.UpSampling or
+                  node._type is NodeType.Eltwise):
                 if run.conv:
                     self.run.append(run)
                     run = FPGARun()
@@ -826,12 +832,14 @@ class FPGANetwork:
             elif node._type is NodeType.UpSampling:
                 pass
             elif (node._type is NodeType.Concat and
-                  node._param.axis == 0):
-                node._output_size = sum([x._output_size for x in node._input_nodes])
+                  (node._param.axis == 0 or
+                   len(node._input_dim) == 3 and node._param.axis == 2)):
+                pass
+            elif node._type is NodeType.Eltwise:
+                pass
             elif node._type is NodeType.InnerProduct:
                 pass
             elif node._type is NodeType.Flatten:
-                node._output_size = node._input_nodes[0]._output_size
                 dim = node._input_dim
                 if (dim[-1] <= 8 or
                     len(dim) == 3 and dim[0] == 1 and dim[1] == 1):
@@ -839,16 +847,15 @@ class FPGANetwork:
                     converted_node.append(node)
                     continue
             elif node._type is NodeType.Reshape:
-                node._output_size = node._input_nodes[0]._output_size
                 index += 1
                 converted_node.append(node)
                 continue
             elif node._type is NodeType.Custom:
-                node._output_size *= 2
+                pass
             elif node._type is NodeType.Input:
                 pass
             elif node._type is NodeType.SoftMax:
-                node._output_size *= 2
+                pass
             else:
                 ignore = True
 
@@ -1008,12 +1015,12 @@ class FPGANetwork:
         for index, lr in enumerate(live_ranges):
             necessary_size = make_align_size(lr.layer.node_out._output_size)
             if lr.output_concat_lr:
+                offset = 0
+                for node in lr.output_concat_lr.layer.node_in._input_nodes:
+                    if node == lr.layer.node_out:
+                        break
+                    offset += node._output_size
                 if lr.output_concat_lr.allocated:
-                    offset = 0
-                    for node in lr.output_concat_lr.layer.node_in._input_nodes:
-                        if node == lr.layer.node_out:
-                            break
-                        offset += node._output_size
                     lr.allocated = True
                     lr.layer.output_addr_offset = (lr.output_concat_lr.layer.output_addr_offset
                                                    + offset)
@@ -1035,7 +1042,10 @@ class FPGANetwork:
                         necessary_size):
                         layer_allocated = True
                         lr.layer.output_addr_offset = current_offset
-                        current_live_ranges.insert(i, lr)
+                        if lr.output_concat_lr:
+                            current_live_ranges.insert(i, lr.output_concat_lr)
+                        else:
+                            current_live_ranges.insert(i, lr)
                         break;
                     else:
                         increment_size = make_align_size(
@@ -1048,7 +1058,10 @@ class FPGANetwork:
 
                 # if not, put it in the end of current buffer
                 if not layer_allocated:
-                    current_live_ranges.append(lr)
+                    if lr.output_concat_lr:
+                        current_live_ranges.append(lr.output_concat_lr)
+                    else:
+                        current_live_ranges.append(lr)
                     lr.layer.output_addr_offset = current_offset
                     if current_offset + necessary_size > allocated_size:
                         allocated_size = current_offset + necessary_size
@@ -1057,8 +1070,9 @@ class FPGANetwork:
                 if lr.output_concat_lr and not lr.output_concat_lr.allocated:
                     lr.output_concat_lr.allocated = True
                     lr.output_concat_lr.layer.output_addr_offset = lr.layer.output_addr_offset
+                    lr.layer.output_addr_offset += offset
 
-            logging.info("{:22s} {:22s} {:12s} {:02d} {:02d} {:18s} {:<8d} {:d}{:s}".format(
+            logging.info("{:22s} {:22s} {:12s} {:02d} {:02d} {:18s} {:08X} {:08X}{:s}".format(
                 lr.layer.node_in._name, lr.layer.node_out._name,
                 str(lr.layer.type),
                 lr.birth_index, lr.death_index,
