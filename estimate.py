@@ -39,27 +39,8 @@ patch_path()
 from perf_cache import PerfCache, ConvConf, FCConf, SMConf
 
 
-class Result(object):
-    @property
-    def time_ms(self):
-        raise NotImplementedError()
-
-
-class ResultZero(Result):
-    @property
-    def time_ms(self):
-        return 0.0
-
-
-class ResultUnknown(Result):
-    @property
-    def time_ms(self):
-        return None
-
-
-class ResultConf(Result):
+class ResultConf(object):
     def __init__(self):
-        super(ResultConf, self).__init__()
         self._time_ms = None
         self._succeeded = None
         self._error_message = None
@@ -119,16 +100,45 @@ class ResultConf(Result):
         self._ts_last_run = value
 
 
+class ZeroConf(object):
+    @property
+    def succeeded(self):
+        return True
+
+
+class ResultZero(ResultConf):
+    def __init__(self):
+        super(ResultZero, self).__init__()
+        self.time_ms = 0.0
+        self.conf = ZeroConf()
+
+    @property
+    def comment(self):
+        return "(Layer does nothing by design) "
+
+
+class ResultUnknown(ResultConf):
+    @property
+    def comment(self):
+        return "(Unsupported Layer) "
+
+
 class ResultConv(ResultConf):
-    pass
+    @property
+    def comment(self):
+        return ""
 
 
 class ResultFC(ResultConf):
-    pass
+    @property
+    def comment(self):
+        return ""
 
 
 class ResultSM(ResultConf):
-    pass
+    @property
+    def comment(self):
+        return "(Executed on CPU) "
 
 
 def estimate_conv_run(run, layer, cache, quantization):
@@ -374,15 +384,18 @@ def main():
                         total_time += dt
                         n_estimated += 1
             for r in res:
-                print("  %.1f" % r.time_ms)
+                print("  %.1f" % r.time_ms
+                      if r.time_ms is not None else "  None")
         else:
             for r in res:
                 n_total += 1
                 dt = r.time_ms
-                print("%.1f" % dt)
                 if dt is not None:
+                    print("%.1f" % dt)
                     total_time += dt
                     n_estimated += 1
+                else:
+                    print("None")
 
     print("Estimated for %d layers out of %d (%.0f%%)" %
           (n_estimated, n_total, 100.0 * n_estimated / n_total))
