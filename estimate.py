@@ -105,6 +105,10 @@ class ZeroConf(object):
     def succeeded(self):
         return True
 
+    @property
+    def cpu(self):
+        return False
+
 
 class ResultZero(ResultConf):
     def __init__(self):
