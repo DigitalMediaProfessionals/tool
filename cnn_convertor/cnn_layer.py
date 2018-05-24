@@ -5,12 +5,12 @@
  All rights reserved.
 ------------------------------------------------------------
 """
-
 import math
 import logging
 from cnn_convertor import cnn_exception
 from typing import List, Union, Tuple
 from enum import IntEnum, auto
+
 
 class NodeType(IntEnum):
     NonSupported = auto()
@@ -23,6 +23,7 @@ class NodeType(IntEnum):
     Eltwise = auto()
     Pooling = auto()
     UpSampling = auto()
+    Power = auto()
     ReLU = auto()
     TanH = auto()
     Input = auto()
@@ -32,12 +33,15 @@ class NodeType(IntEnum):
     Flatten = auto()
     Reshape = auto()
     Custom = auto()
+    ELU = auto()
+    Sigmoid = auto()
 
     def __repr__(self):
         return '<%s.%s>' % (self.__class__.__name__, self.name)
 
     def __str__(self):
         return self.name
+
 
 class NodeParam:
     def __init__(self):
@@ -46,17 +50,22 @@ class NodeParam:
         self.pad = (0, 0)
         self.keras_padding = None
         self.stride = (1, 1)
-        self.pool = 0 #0:max, 1:avg
+        self.pool = 0  # 0:max, 1:avg
         self.group = 1
         self.relu_param = 0.0
         self.is_global = False
         self.reshape_param = ()
         self.axis = -1
         self.custom_param = None
+        self.scale = 1.0
+
     def __repr__(self):
-        ret = "[num_output:%d, kernel_size:%s, pad:%s, stride:%s, pool:%d, group:%d, relu_param:%f, is_global:%d]"
+        ret = ("[num_output:%d, kernel_size:%s, pad:%s, stride:%s, pool:%d, "
+               "group:%d, relu_param:%f, is_global:%d]")
         return ret % (self.num_output, self.kernel_size, self.pad,
-                      self.stride, self.pool, self.group, self.relu_param, self.is_global)
+                      self.stride, self.pool, self.group, self.relu_param,
+                      self.is_global)
+
 
 class LayerNode:
     """Represent one layer node in a CNN.
@@ -66,8 +75,8 @@ class LayerNode:
         self,
         name: str,
         node_type: NodeType,
-        input_node: Union['LayerNode', List['LayerNode']] = None,
-        output_node: Union['LayerNode', List['LayerNode']] = None,
+        input_node: Union['LayerNode', List['LayerNode']]=None,
+        output_node: Union['LayerNode', List['LayerNode']]=None,
     ) -> None:
         """Construct a LayerNode
 
@@ -86,11 +95,11 @@ class LayerNode:
         """
         self._name = name
         self._type = node_type
-        if input_node == None:
+        if input_node is None:
             input_node = []
         elif type(input_node) is not list:
             input_node = [input_node]
-        if output_node == None:
+        if output_node is None:
             output_node = []
         elif type(output_node) is not list:
             output_node = [output_node]
@@ -108,10 +117,9 @@ class LayerNode:
     def __repr__(self):
         ret = "['%s', %s, _param:%s]"
         return ret % (
-                self._name,
-                self._type,
-                str(self._param)
-                )
+            self._name,
+            self._type,
+            str(self._param))
 
     def set_bn_node(self, node: 'LayerNode'):
         """ Set the batched normalization node for convolution node."""
@@ -153,12 +161,13 @@ class LayerNode:
         self._mean = mean
         self._var = var
 
-class Network:
-    """Represent a CNN.
-    """
 
+class Network(object):
+    """Represents a CNN.
+    """
     def __init__(self, custom_layer) -> None:
-        """Construct an empty CNN."""
+        """Construct an empty CNN.
+        """
         self._input_nodes = []
         self._output_node = None
         self._debug_node = None
@@ -189,7 +198,7 @@ class Network:
         self._output_node = node
 
     def split_pool_node(self, node):
-        #only handle case where kernel_size[0] and [1] are equal now
+        # only handle case where kernel_size[0] and [1] are equal now
         candidates = [7, 6, 5, 4, 3, 2]
         insert_index = self._traverse_list.index(node) + 1
         k_size = node._param.kernel_size[0]
@@ -274,7 +283,7 @@ class Network:
             if is_pool:
                 w = math.ceil(w)
                 h = math.ceil(h)
-                #adjust padding
+                # adjust padding
                 padx = param.pad[0]
                 while ((dim[0] + padx - param.kernel_size[0]) % param.stride[0]) > padx:
                     padx += 1
@@ -291,8 +300,8 @@ class Network:
         for node in tr_list:
             if node._type == NodeType.Input:
                 continue
-            #For Keras, DepthwiseConvolution node don't have output_size set.
-            #Set it here
+            # For Keras, DepthwiseConvolution node don't have output_size set.
+            # Set it here
             dim = node._input_nodes[0]._output_dim
             if node._param.num_output == 0:
                 node._param.num_output = dim[-1] * node._param.group
@@ -317,14 +326,17 @@ class Network:
                 else:
                     dim = get_output_xy(dim, node._param, True) + (dim[2],)
                 node.set_output_dim(dim)
-                #split pool node if kernel size > 7
+                # split pool node if kernel size > 7
                 if (node._param.kernel_size[0] > 7 or
-                    node._param.kernel_size[1] > 7):
+                        node._param.kernel_size[1] > 7):
                     self.split_pool_node(node)
             elif node._type == NodeType.UpSampling:
                 node.set_input_dim(dim)
                 dim = (dim[0] * node._param.kernel_size[0],
                        dim[1] * node._param.kernel_size[1], dim[2])
+                node.set_output_dim(dim)
+            elif node._type == NodeType.Power:
+                node.set_input_dim(dim)
                 node.set_output_dim(dim)
             elif node._type == NodeType.Concat:
                 axis = node._param.axis
@@ -359,7 +371,8 @@ class Network:
                 node.set_input_dim(dim)
                 node.set_output_dim(dim)
 
+
 # Test script
 if __name__ == '__main__':
     t1 = LayerNode('test1', NodeType.Convolution)
-    t2 = LayerNode('test2', NodeType.ReLU, input_node = t1)
+    t2 = LayerNode('test2', NodeType.ReLU, input_node=t1)

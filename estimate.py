@@ -21,7 +21,7 @@ import os
 
 from cnn_convertor import fpga_layer, cnn_layer, parser_caffe, parser_keras
 from cnn_convertor.fpga_layer import \
-    LayerType, NodeType, get_weight_size, get_fc_weight_size
+    LayerType, NodeType, get_weight_size, get_fc_weight_size, get_actfunc
 
 
 def patch_path():
@@ -189,7 +189,7 @@ def estimate_conv_run(run, layer, cache, quantization):
     if run.conv is not None:
         node_in = run.conv
         if node_in._act_node:
-            actfunc = (1 if node_in._act_node._type is NodeType.TanH else 2)
+            actfunc = get_actfunc(node_in._act_node._type)
             actfunc_param = node_in._act_node._param.relu_param
     node_out = run.conv
     if run.pool is not None:
@@ -200,6 +200,9 @@ def estimate_conv_run(run, layer, cache, quantization):
                                     run.pool._param.kernel_size[1])
         if node_out._type is NodeType.UpSampling:
             pool_enable = 4
+        if node_out._type is NodeType.Power:
+            pool_enable = 2
+            pool_avg_param = node_out._param.scale
     conf.pool_enable = pool_enable
     conf.actfunc = actfunc
     conf.actfunc_param = actfunc_param
