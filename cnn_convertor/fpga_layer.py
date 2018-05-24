@@ -495,9 +495,13 @@ def gen_source_conv(of, name, n, layer, quantization):
         of.write('    _conf.sw.output.z = 1; // Output Depth\n')
         of.write('    _conf.sw.output.m = {0}; // Output Channels\n'.format(layer.node_out._output_dim[0]))
     of.write('    _conf.hw.output.output_base_addr = 0x{0:08X}; // Output byte address\n'.format(layer.output_addr_offset))
-    of.write('    _conf.hw.output.eltwise_base_addr = 0xDEADBEEF; // Input byte address for elementwise add (0 = UBUF Input Buffer)\n'
-             '    _conf.hw.output.output_mode =0; // 0 = concat, 1 = eltwise add\n\n'
-             '    //Runs Configuration:\n')
+    if layer.run[0].pool and layer.run[0].pool._type is NodeType.Eltwise:
+        of.write('    _conf.hw.output.eltwise_base_addr = 0x{0:08X}; // Input byte address for elementwise add (0 = UBUF Input Buffer)\n'
+                 '    _conf.hw.output.output_mode = 1; // 0 = concat, 1 = eltwise add\n\n'.format(layer.layer_in[1].output_addr_offset))
+    else:
+        of.write('    _conf.hw.output.eltwise_base_addr = 0xDEADBEEF; // Input byte address for elementwise add (0 = UBUF Input Buffer)\n'
+                 '    _conf.hw.output.output_mode = 0; // 0 = concat, 1 = eltwise add\n\n')
+    of.write('    //Runs Configuration:\n')
     of.write('    //->{0} run(s)\n'.format(len(layer.run)))
     for i, run in enumerate(layer.run):
         is_conv = run.conv is not None and run.conv._type is NodeType.Convolution
@@ -872,6 +876,7 @@ class FPGANetwork:
                 # can merge with previous convolution node
                 if (prev_node_type == NodeType.Convolution and
                         node._param.pool == 0 and
+						layer_start_index != -1 and
                         calc_conv_tiles(tl[index - 1]) == 1 and
                         calc_pool_tiles(node) == 1):
                     index += 1
