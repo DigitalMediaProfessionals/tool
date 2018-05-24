@@ -5,22 +5,24 @@
  All rights reserved.
 ------------------------------------------------------------
 """
-
 import logging
 from collections import OrderedDict
 from cnn_convertor import cnn_layer, cnn_exception
 import h5py
 import json
 import numpy as np
-NodeType = cnn_layer.NodeType
 
+
+NodeType = cnn_layer.NodeType
 padding = (0, 0)
+
 
 def get_padding():
     global padding
     ret = tuple(padding)
     padding = (0, 0)
     return ret
+
 
 def set_inplace_node(node, config):
     activation = config['activation']
@@ -36,6 +38,7 @@ def set_inplace_node(node, config):
                                   node_type, input_node)
     if input_node is None:
         node.set_activation_node(in_node)
+
 
 def get_weights(netweight, layer_name, need_flip, num):
     weights = []
@@ -60,7 +63,8 @@ def get_weights(netweight, layer_name, need_flip, num):
             weights.append(np.zeros((num_out)))
     return weights
 
-def parse_keras_network2(network, net_def, netweight, need_flip = False):
+
+def parse_keras_network2(network, net_def, netweight, need_flip=False):
     type_map = {
         'Conv2D': NodeType.Convolution,
         'DepthwiseConv2D': NodeType.Convolution,
@@ -93,7 +97,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
                 is_channel_first = True
             else:
                 is_channel_first = False
-            break;
+            break
 
     top_map = {}
     prev_node = None
@@ -121,7 +125,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
             input_nodes = prev_node
             up_node = prev_node
         else:
-            #search for exsisting input and output nodes
+            # search for exsisting input and output nodes
             input_nodes = []
             if len(layer['inbound_nodes']) > 0:
                 inbound_nodes = [x[0] for x in layer['inbound_nodes'][0]]
@@ -155,13 +159,14 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
             top_map[layer_name] = up_node
             continue
         elif layer_type == 'BatchNormalization':
-            #handle case that the up_node is not a convolution node
+            # handle case that the up_node is not a convolution node
             if up_node is None or up_node._type is not NodeType.Convolution:
                 up_node = cnn_layer.LayerNode(layer_name, NodeType.Convolution,
                                               input_nodes)
                 param = cnn_layer.NodeParam()
-                #For keras, output is not set for depthwise convolution
-                #skip setting num_output and set it when calculating in_out sizes
+                # For keras, output is not set for depthwise convolution
+                # skip setting num_output and set it
+                # when calculating in_out sizes
                 param.kernel_size = (1, 1)
                 param.pad = (0, 0)
                 param.keras_padding = 'same'
@@ -184,7 +189,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
             top_map[layer_name] = up_node
             continue
         elif layer_type == 'ZeroPadding2D':
-            #there is no padding layer if caffe so just extract padding info
+            # there is no padding layer if caffe so just extract padding info
             global padding
             pad = config['padding']
             if type(pad) is not list:
@@ -205,7 +210,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
             node_type = NodeType.Input
         elif layer_type in network._custom_layer:
             custom_config = network._custom_layer[layer_type]
-            #set parameter type if it is the first time
+            # set parameter type if it is the first time
             if type(custom_config[0]) is list:
                 c_type_map = {int: 'int', bool: 'bool', float: 'float'}
                 param_list = OrderedDict()
@@ -232,10 +237,10 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
         node = cnn_layer.LayerNode(layer_name, node_type, input_nodes)
         prev_node = node
 
-        #add this node to top_map
+        # add this node to top_map
         if layer_name in top_map:
             raise cnn_exception.ParseError(
-                    'Ill-formed layer. name:' + layer_name)
+                'Ill-formed layer. name:' + layer_name)
         top_map[layer_name] = node
 
         if node_type == NodeType.Input:
@@ -249,8 +254,8 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
             node.set_output_dim(dim)
         elif node_type == NodeType.Convolution:
             param = cnn_layer.NodeParam()
-            #For keras, output is not set for depthwise convolution
-            #skip setting num_output and set it when calculating in_out sizes
+            # For keras, output is not set for depthwise convolution
+            # skip setting num_output and set it when calculating in_out sizes
             if layer_type != 'DepthwiseConv2D':
                 param.num_output = config['filters']
             param.kernel_size = tuple(config['kernel_size'])
@@ -267,13 +272,11 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
                 node.set_weight_bias(weights[0], weights[1])
         elif node_type == NodeType.Pooling:
             param = cnn_layer.NodeParam()
-            if (layer_type == 'MaxPooling2D' or
-                layer_type == 'GlobalMaxPooling2D'):
+            if layer_type in ('MaxPooling2D', 'GlobalMaxPooling2D'):
                 param.pool = 0
             else:
                 param.pool = 1
-            if (layer_type == 'MaxPooling2D' or
-                layer_type == 'AveragePooling2D'):
+            if layer_type in ('MaxPooling2D', 'AveragePooling2D'):
                 param.kernel_size = tuple(config['pool_size'])
                 param.pad = get_padding()
                 param.keras_padding = config['padding']
@@ -319,19 +322,22 @@ def parse_keras_network2(network, net_def, netweight, need_flip = False):
         elif node_type == NodeType.Custom:
             param = cnn_layer.NodeParam()
             custom_config = network._custom_layer[layer_type]
-            custom_param = (OrderedDict({x:config[x] for x in custom_config[0]}),
-                            custom_config[1], layer_type)
+            custom_param = (
+                OrderedDict({x: config[x] for x in custom_config[0]}),
+                custom_config[1], layer_type)
             param.custom_param = custom_param
             node.set_param(param)
     network.set_output_node(node)
+
 
 def parse_keras_network(network, network_data):
     logging.info('Parsing Keras network.')
 
     try:
         keras_net = h5py.File(network_data, 'r')
-    except:
-        logging.exception('Exception occurred while opening Input network')
+    except Exception as e:
+        logging.exception(
+            'Exception occurred while opening Input network: %s', e)
         raise
 
     version = keras_net.attrs['keras_version'].decode('utf-8')

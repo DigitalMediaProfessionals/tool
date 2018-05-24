@@ -12,6 +12,7 @@ from google.protobuf import text_format
 import numpy as np
 NodeType = cnn_layer.NodeType
 
+
 def get_tuple(param):
     try:
         if len(param) == 0:
@@ -23,6 +24,7 @@ def get_tuple(param):
     except TypeError:
         return (param, param)
 
+
 def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
     type_map = {
         'Convolution': NodeType.Convolution,
@@ -33,8 +35,12 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
         'Concat': NodeType.Concat,
         'Eltwise': NodeType.Eltwise,
         'Pooling': NodeType.Pooling,
+        'Upsample': NodeType.UpSampling,
+        'Power': NodeType.Power,
         'ReLU': NodeType.ReLU,
         'TanH': NodeType.TanH,
+        'ELU': NodeType.ELU,
+        'Sigmoid': NodeType.Sigmoid,
         'Input': NodeType.Input,
         'Data': NodeType.Data,
         'Dropout': NodeType.DropOut,
@@ -46,8 +52,9 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
     caffe_net = caffe_pb2.NetParameter()
     try:
         text_format.Parse(netdef, caffe_net)
-    except:
-        logging.exception('Exception occurred while parsing Input network')
+    except Exception as e:
+        logging.exception(
+            "Exception occurred while parsing Input network: %s", e)
         raise
 
     top_map = {}
@@ -56,12 +63,12 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
         node = cnn_layer.LayerNode(caffe_net.input[0], NodeType.Input)
         network.append_input_node(node)
         if len(caffe_net.input_dim) == 4:
-            dim = (caffe_net.input_dim[2],
-                   caffe_net.input_dim[3],
+            dim = (caffe_net.input_dim[3],
+                   caffe_net.input_dim[2],
                    caffe_net.input_dim[1])
         elif len(caffe_net.input_shape) == 1:
-            dim = (caffe_net.input_shape[0].dim[2],
-                   caffe_net.input_shape[0].dim[3],
+            dim = (caffe_net.input_shape[0].dim[3],
+                   caffe_net.input_shape[0].dim[2],
                    caffe_net.input_shape[0].dim[1])
         node.set_input_dim(dim)
         node.set_output_dim(dim)
@@ -77,10 +84,8 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             raise cnn_exception.ParseError('Unsupported type:' + layer.type)
 
         node_type = type_map[layer.type]
-        if (node_type == NodeType.ReLU or
-            node_type == NodeType.TanH or
-            node_type == NodeType.BatchNorm or
-            node_type == NodeType.Scale):
+        if node_type in (NodeType.ReLU, NodeType.TanH, NodeType.ELU,
+                         NodeType.Sigmoid, NodeType.BatchNorm, NodeType.Scale):
             node = cnn_layer.LayerNode(layer.name, node_type)
             up_node = top_map[layer.bottom[0]]
             if node_type == NodeType.BatchNorm:
@@ -94,29 +99,29 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
                     node.set_param(param)
                 up_node.set_activation_node(node)
             continue
-        elif (node_type == NodeType.DropOut or
-              node_type == NodeType.Data): #ignore data and drop out layer
+        elif node_type in (NodeType.DropOut, NodeType.Data):
+            # Ignore data and drop out layer
             continue
 
         input_nodes = []
 
-        #search for exsisting input and output nodes
+        # search for exsisting input and output nodes
         for label in layer.bottom:
             if label in top_map:
                 input_nodes.append(top_map[label])
         node = cnn_layer.LayerNode(layer.name, node_type, input_nodes)
 
-        #add this node to top_map and bottom_map
+        # add this node to top_map and bottom_map
         for label in layer.top:
             if label in top_map:
                 raise cnn_exception.ParseError(
-                        'Ill-formed layer. name:' + layer.name)
+                    "Ill-formed layer. name: %s" % layer.name)
             top_map[label] = node
 
         if node_type == NodeType.Input:
             network.append_input_node(node)
-            dim = (layer.input_param.shape[0].dim[2],
-                   layer.input_param.shape[0].dim[3],
+            dim = (layer.input_param.shape[0].dim[3],
+                   layer.input_param.shape[0].dim[2],
                    layer.input_param.shape[0].dim[1])
             node.set_input_dim(dim)
             node.set_output_dim(dim)
@@ -137,6 +142,19 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             param.stride = get_tuple(layer.pooling_param.stride)
             param.is_global = layer.pooling_param.global_pooling
             node.set_param(param)
+        elif node_type == NodeType.UpSampling:
+            param = cnn_layer.NodeParam()
+            param.kernel_size = 2, 2
+            node.set_param(param)
+        elif node_type == NodeType.Power:
+            if layer.power_param.power != 1 or layer.power_param.shift != 0:
+                raise ValueError(
+                    "Power layer is supported only with "
+                    "power = 1 and shift = 0, got %s and %s" %
+                    (layer.power_param.power, layer.power_param.shift))
+            param = cnn_layer.NodeParam()
+            param.scale = float(layer.power_param.scale)
+            node.set_param(param)
         elif node_type == NodeType.InnerProduct:
             param = cnn_layer.NodeParam()
             param.num_output = int(layer.inner_product_param.num_output)
@@ -147,6 +165,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
         last_node = node
     network.set_output_node(last_node)
 
+
 def parse_caffe_def(
     network: cnn_layer.Network,
     network_def: str
@@ -155,14 +174,16 @@ def parse_caffe_def(
     with open(network_def, 'r') as fin:
         parse_caffe_def2(network, fin.read())
 
+
 def search_caffe_layer(layers, name):
     caffe_layer = [x for x in layers if x.name == name]
     if len(caffe_layer) == 0:
         logging.exception('Layer with name:' + name +
-                         ' not found in input data network.')
+                          ' not found in input data network.')
         raise cnn_exception.ParseError('Layer ' + name +
                                        ' not found')
     return caffe_layer[0]
+
 
 def parse_caffe_data(
     network: cnn_layer.Network,
@@ -173,8 +194,9 @@ def parse_caffe_data(
     try:
         with open(network_data, 'rb') as fin:
             caffe_net.ParseFromString(fin.read())
-    except:
-        logging.exception('Exception occurred while parsing Input network')
+    except Exception as e:
+        logging.exception(
+            "Exception occurred while parsing Input network: %s", e)
         raise
 
     network._debug_node = caffe_net
@@ -182,10 +204,10 @@ def parse_caffe_data(
         layers = caffe_net.layer
     else:
         layers = caffe_net.layers
-    
+
     for layer in network._traverse_list:
         if (layer._type is not NodeType.Convolution and
-            layer._type is not NodeType.InnerProduct):
+                layer._type is not NodeType.InnerProduct):
             continue
         caffe_layer = search_caffe_layer(layers, layer._name)
         weight = np.float32(caffe_layer.blobs[0].data)
@@ -195,7 +217,7 @@ def parse_caffe_data(
             bias = np.zeros((layer._output_dim[2]))
         layer.set_weight_bias(weight, bias)
 
-        #set parameters for BatchNorm node and Scale node
+        # set parameters for BatchNorm node and Scale node
         if layer._bn_node:
             caffe_layer = search_caffe_layer(layers, layer._bn_node._name)
             mean = np.float32(caffe_layer.blobs[0].data)
