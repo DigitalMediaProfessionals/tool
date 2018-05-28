@@ -68,6 +68,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
     type_map = {
         'Conv2D': NodeType.Convolution,
         'DepthwiseConv2D': NodeType.Convolution,
+        'SeparableConv2D': NodeType.Convolution,
         'Dense': NodeType.InnerProduct,
         'LRN': NodeType.LRN,
         'Concatenate': NodeType.Concat,
@@ -256,20 +257,40 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             param = cnn_layer.NodeParam()
             # For keras, output is not set for depthwise convolution
             # skip setting num_output and set it when calculating in_out sizes
-            if layer_type != 'DepthwiseConv2D':
+            if (layer_type != 'DepthwiseConv2D' and
+                    layer_type != 'SeparableConv2D'):
                 param.num_output = config['filters']
             param.kernel_size = tuple(config['kernel_size'])
             param.pad = get_padding()
             param.keras_padding = config['padding']
             param.stride = tuple(config['strides'])
-            if layer_type == 'DepthwiseConv2D':
+            if (layer_type == 'DepthwiseConv2D' or
+                    layer_type == 'SeparableConv2D'):
                 param.group = config['depth_multiplier']
+                if param.group > 1:
+                    logging.error('Depthwise/Separable Convolution with'\
+                                  '\'depth_multiplier\' is not supported.')
+                    raise cnn_exception.ParseError('Unsupported param')
             node.set_param(param)
+
+            if layer_type == 'SeparableConv2D':
+                point_node = cnn_layer.LayerNode(layer_name + '_point',
+                                                 node_type, node)
+                prev_node = point_node
+                top_map[layer_name] = point_node
+                param = cnn_layer.NodeParam()
+                param.num_output = config['filters']
+                point_node.set_param(param)
+
             if config['activation'] != 'linear':
-                set_inplace_node(node, config)
+                set_inplace_node(prev_node, config)
             if netweight is not None:
                 weights = get_weights(netweight, layer_name, need_flip, 2)
-                node.set_weight_bias(weights[0], weights[1])
+                if layer_type == 'SeparableConv2D':
+                    node.set_weight_bias(weights[0], None)
+                    point_node.set_weight_bias(weights[1], weights[2])
+                else:
+                    node.set_weight_bias(weights[0], weights[1])
         elif node_type == NodeType.Pooling:
             param = cnn_layer.NodeParam()
             if layer_type in ('MaxPooling2D', 'GlobalMaxPooling2D'):

@@ -171,9 +171,11 @@ def pack_weight(node, of, quantization):
 
     weight = node._weight
     bias = node._bias
-    if weight is None and bias is None:
-        weight = np.ones((n_m, n_c, kernel_size[1], kernel_size[0]), np.float32)
-        bias = np.zeros((n_m, n_c), np.float32)
+    if weight is None or bias is None:
+        if weight is None:
+            weight = np.ones((n_m, n_c, kernel_size[1], kernel_size[0]), np.float32)
+        if bias is None:
+            bias = np.zeros((n_m, n_c), np.float32)
         node.set_weight_bias(weight, bias)
 
     if node._bn_node is not None or node._sc_node is not None:
