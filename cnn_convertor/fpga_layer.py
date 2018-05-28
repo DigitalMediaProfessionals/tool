@@ -47,6 +47,8 @@ def get_conv_out_width(width, kx, pad, stride):
 
 
 def calc_conv_tiles(node):
+    if node._param.group > 1:
+        return 1
     w = node._input_dim[0]
     h = node._input_dim[1]
     c = node._input_dim[2]
@@ -820,7 +822,7 @@ class FPGALayer:
 
         # determine layer parameters
         topo = 0
-        max_tiles = 0
+        max_tiles = 1
         for i, run in enumerate(self.run):
             node_out = run.conv
             if (run.pool):
@@ -831,9 +833,9 @@ class FPGALayer:
             if run.conv is not None:
                 tiles = calc_conv_tiles(run.conv)
                 max_tiles = max(tiles, max_tiles)
-            if run.pool is not None:
-                tiles = calc_pool_tiles(run.pool)
-                max_tiles = max(tiles, max_tiles)
+                if run.pool is not None:
+                    tiles = calc_pool_tiles(run.pool)
+                    max_tiles = max(tiles, max_tiles)
         if len(self.run) > 0 and topo == 0:
             topo = 1
         self.topo = topo
