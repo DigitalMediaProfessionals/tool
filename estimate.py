@@ -41,6 +41,8 @@ from perf_cache import PerfCache, ConvConf, FCConf, SMConf
 
 class ResultConf(object):
     def __init__(self):
+        self.mul_ops = None
+        self.add_ops = None
         self._time_ms = None
         self._succeeded = None
         self._error_message = None
@@ -117,6 +119,8 @@ class ZeroConf(object):
 class ResultZero(ResultConf):
     def __init__(self):
         super(ResultZero, self).__init__()
+        self.mul_ops = 0
+        self.add_ops = 0
         self.time_ms = 0.0
         self.conf = ZeroConf()
 
@@ -147,6 +151,65 @@ class ResultSM(ResultConf):
     @property
     def comment(self):
         return "(Executed on CPU) "
+
+
+def estimate_ops_per_run(run):
+    """Returns tuple of number of (multiplications, additions)
+    required to execute provided run.
+    """
+    total_mul_ops = 0
+    total_add_ops = 0
+    if run.conv is not None:
+        c = run.conv._input_dim[2]
+        d = run.conv._output_dim
+        k = run.conv._param.kernel_size
+        if run.conv._param.group <= 1:
+            mul_ops = d[0] * d[1] * k[0] * k[1] * c * d[2]
+        else:
+            mul_ops = d[0] * d[1] * k[0] * k[1] * c
+        add_ops = mul_ops
+        total_mul_ops += mul_ops
+        total_add_ops += add_ops
+    if run.pool is not None:
+        d = run.pool._output_dim
+        k = run.pool._param.kernel_size
+        if str(run.pool._type) == "UpSampling":
+            mul_ops = 0
+            add_ops = 0
+        elif run.pool._param.pool == 0:  # max pooling
+            mul_ops = 0
+            add_ops = d[0] * d[1] * d[2] * (k[0] * k[1] - 1)
+        else:  # avg pooling
+            mul_ops = d[0] * d[1] * d[2]
+            add_ops = d[0] * d[1] * d[2] * (k[0] * k[1] - 1)
+        total_mul_ops += mul_ops
+        total_add_ops += add_ops
+    return total_mul_ops, total_add_ops
+
+
+def estimate_ops_per_conv(layer):
+    """Returns tuple of number of (multiplications, additions)
+    required to execute provided convolutional layer.
+    """
+    total_mul_ops = 0
+    total_add_ops = 0
+
+    for run in layer.run:
+        mul_ops, add_ops = estimate_ops_per_run(run)
+        total_mul_ops += mul_ops
+        total_add_ops += add_ops
+
+    return total_mul_ops, total_add_ops
+
+
+def estimate_ops_per_fc(layer):
+    if layer.type is not fpga_layer.LayerType.InnerProduct:
+        return None, None
+    c = layer.node_in._input_dim
+    d = layer.node_in._output_dim
+    mul_ops = c[-1] * d[-1]
+    add_ops = mul_ops
+    return mul_ops, add_ops
 
 
 def estimate_conv_run(run, layer, cache, quantization):
@@ -227,6 +290,8 @@ def estimate_conv_run(run, layer, cache, quantization):
 
     result.estimate(cache, conf)
 
+    result.mul_ops, result.add_ops = estimate_ops_per_run(run)
+
     return result
 
 
@@ -279,6 +344,8 @@ def estimate_fc(layer, cache, quantization):
 
     result.estimate(cache, conf)
 
+    result.mul_ops, result.add_ops = estimate_ops_per_fc(layer)
+
     return None, [result], layer
 
 
@@ -297,9 +364,13 @@ def estimate_sm(layer, cache):
 
     # Adjust time as DB stores only timing
     # for single dimension softmax application
+    num_runs = (np.prod(layer.node_in._input_dim) /
+                layer.node_in._input_dim[axis])
     if result.time_ms is not None:
-        result.time_ms *= (np.prod(layer.node_in._input_dim) /
-                           layer.node_in._input_dim[axis])
+        result.time_ms *= num_runs
+
+    result.mul_ops = 10 * layer.node_in._input_dim[axis] * num_runs
+    result.add_ops = 10 * layer.node_in._input_dim[axis] * num_runs
 
     return None, [result], layer
 
@@ -371,10 +442,14 @@ def main():
     total_time = 0.0
     n_estimated = 0
     n_total = 0
+    n_muls = 0
+    n_adds = 0
     for group, res, _layer in results:
         if group is not None:
             smm = 0.0
             for r in res:
+                n_muls += r.mul_ops
+                n_adds += r.add_ops
                 dt = r.time_ms
                 if dt is not None:
                     smm += dt
@@ -396,17 +471,21 @@ def main():
                         n_estimated += 1
             for r in res:
                 print("  %.1f" % r.time_ms
-                      if r.time_ms is not None else "  None")
+                      if r.time_ms is not None else "  None",
+                      "%d muls %d adds" % (r.mul_ops, r.add_ops))
         else:
             for r in res:
+                n_muls += r.mul_ops
+                n_adds += r.add_ops
                 n_total += 1
                 dt = r.time_ms
                 if dt is not None:
-                    print("%.1f" % dt)
+                    print("%.1f" % dt,
+                          "%d muls %d adds" % (r.mul_ops, r.add_ops))
                     total_time += dt
                     n_estimated += 1
                 else:
-                    print("None")
+                    print("None", "%d muls %d adds" % (r.mul_ops, r.add_ops))
 
     print("Estimated for %d layers out of %d (%.0f%%)" %
           (n_estimated, n_total, 100.0 * n_estimated / n_total))
@@ -414,6 +493,8 @@ def main():
         print("Time is %.1f msec" % total_time)
     else:
         print("Time is greater than %.1f msec" % total_time)
+    print("%d muls %d adds" % (n_muls, n_adds))
+    print("FLOP is %d" % (n_muls + n_adds))
 
 
 if __name__ == "__main__":
