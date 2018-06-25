@@ -40,27 +40,35 @@ def set_inplace_node(node, config):
         node.set_activation_node(in_node)
 
 
-def get_weights(netweight, layer_name, need_flip, num):
+def get_weights(netweight, layer_name, need_flip, weight_entry):
     weights = []
+    weight_names = []
+    for i in range(len(weight_entry)):
+        weight_names.append(None)
     wg = netweight[layer_name]
-    wg_names = wg.attrs['weight_names']
-    for name in wg_names:
-        shape = wg[name].shape
-        w = wg[name][()]
-        if len(shape) == 4:
-            w = np.transpose(w, (3, 2, 0, 1))
-            if need_flip:
-                new_shape = (w.shape[0], w.shape[1], -1)
-                w = np.flip(w.reshape(new_shape), 2)
-        if len(shape) == 2:
-            w = np.transpose(w)
-        weights.append(w.reshape((-1,)))
-    if len(weights) < num:
-        num_out = shape[-1]
-        if num_out == 1:
-            num_out = shape[-2]
-        while len(weights) < num:
-            weights.append(np.zeros((num_out)))
+    for wn in wg.attrs['weight_names']:
+        for i, entry in enumerate(weight_entry):
+            if entry in wn.decode('utf8')[len(layer_name):]:
+                weight_names[i] = wn
+                break
+        if i == len(weight_entry):
+            #This entry is not found, assert
+            logging.error('weight entry %s is not parsed!', wn.decode('utf8'))
+    for name in weight_names:
+        if name is not None:
+            shape = wg[name].shape
+            w = wg[name][()]
+            if len(shape) == 4:
+                w = np.transpose(w, (3, 2, 0, 1))
+                if need_flip:
+                    new_shape = (w.shape[0], w.shape[1], -1)
+                    w = np.flip(w.reshape(new_shape), 2)
+            if len(shape) == 2:
+                w = np.transpose(w)
+            w = w.reshape((-1,))
+        else:
+            w = None
+        weights.append(w)
     return weights
 
 
@@ -93,7 +101,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
 
     # get data_format parameter
     for layer in layers:
-        if layer['class_name'] == 'Conv2D':
+        if 'data_format' in layer['config']:
             if layer['config']['data_format'] == 'channels_first':
                 is_channel_first = True
             else:
@@ -178,7 +186,9 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     up_node.set_weight_bias(None, None)
                 prev_node = up_node
             if netweight is not None:
-                weights = get_weights(netweight, layer_name, need_flip, 4)
+                weights = get_weights(netweight, layer_name, need_flip,
+                                      ['gamma', 'beta',
+                                       'moving_mean', 'moving_variance'])
             node = cnn_layer.LayerNode(layer_name, NodeType.BatchNorm)
             up_node.set_bn_node(node)
             if netweight is not None:
@@ -285,11 +295,15 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             if config['activation'] != 'linear':
                 set_inplace_node(prev_node, config)
             if netweight is not None:
-                weights = get_weights(netweight, layer_name, need_flip, 2)
                 if layer_type == 'SeparableConv2D':
+                    weights = get_weights(netweight, layer_name, need_flip,
+                                          ['depthwise_kernel',
+                                           'pointwise_kernel', 'bias'])
                     node.set_weight_bias(weights[0], None)
                     point_node.set_weight_bias(weights[1], weights[2])
                 else:
+                    weights = get_weights(netweight, layer_name, need_flip,
+                                          ['kernel', 'bias'])
                     node.set_weight_bias(weights[0], weights[1])
         elif node_type == NodeType.Pooling:
             param = cnn_layer.NodeParam()
@@ -316,7 +330,8 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             if config['activation'] != 'linear':
                 set_inplace_node(node, config)
             if netweight is not None:
-                weights = get_weights(netweight, layer_name, need_flip, 2)
+                weights = get_weights(netweight, layer_name, need_flip,
+                                      ['kernel', 'bias'])
                 node.set_weight_bias(weights[0], weights[1])
         elif node_type == NodeType.Reshape:
             param = cnn_layer.NodeParam()
@@ -348,7 +363,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 custom_config[1], layer_type)
             param.custom_param = custom_param
             node.set_param(param)
-    network.set_output_node(node)
+    network.set_output_node(prev_node)
 
 
 def parse_keras_network(network, network_data):
