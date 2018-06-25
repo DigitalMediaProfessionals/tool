@@ -99,17 +99,21 @@ def calc_pool_tiles(node):
 def merge_bn_scale(node, kernel_size, n_c, n_m):
     weight = node._weight
     bias = node._bias
-    if node._bn_node is not None:
+    if node._bn_node is not None and node._bn_node._mean is not None:
         bn_mean = node._bn_node._mean
-        bn_var = node._bn_node._var
     else:
         bn_mean = np.zeros_like(bias)
+    if node._bn_node is not None and node._bn_node._var is not None:
+        bn_var = node._bn_node._var
+    else:
         bn_var = np.full_like(bias, 1.0 - 0.00001)
-    if node._sc_node is not None:
+    if node._sc_node is not None and node._sc_node._weight is not None:
         sc_weight = node._sc_node._weight
-        sc_bias = node._sc_node._bias
     else:
         sc_weight = np.ones_like(bias)
+    if node._sc_node is not None and node._sc_node._bias is not None:
+        sc_bias = node._sc_node._bias
+    else:
         sc_bias = np.zeros_like(bias)
     e = 0.00001
     weight.shape = (n_m, n_c * kernel_size[1] * kernel_size[0])
@@ -177,7 +181,7 @@ def pack_weight(node, of, quantization):
         if weight is None:
             weight = np.ones((n_m, n_c, kernel_size[1], kernel_size[0]), np.float32)
         if bias is None:
-            bias = np.zeros((n_m, n_c), np.float32)
+            bias = np.zeros((n_m,), np.float32)
         node.set_weight_bias(weight, bias)
 
     if node._bn_node is not None or node._sc_node is not None:
@@ -657,6 +661,7 @@ def gen_source_layer(of, name, n, layer, quantization):
                  LayerType.InnerProduct: 'LT_FC',
                  LayerType.Flatten: 'LT_FLATTEN',
                  LayerType.Concatenate: 'LT_CONCAT',
+                 LayerType.CopyConcatenate: 'LT_COPY_CONCAT',
                  LayerType.SoftMax: 'LT_SOFTMAX',
                  LayerType.Custom: 'LT_CUSTOM' }
 
@@ -671,6 +676,8 @@ def gen_source_layer(of, name, n, layer, quantization):
             of.write('//Layer_{0}: Input Layer\n'.format(n))
         elif layer.type is LayerType.Concatenate:
             of.write('//Layer_{0}: Concatenate Layer\n'.format(n))
+        elif layer.type is LayerType.CopyConcatenate:
+            of.write('//Layer_{0}: CopyConcatenate Layer\n'.format(n))
         elif layer.type is LayerType.Flatten:
             of.write('//Layer_{0}: Flatten Layer\n'.format(n))
         elif layer.type is LayerType.SoftMax:
@@ -695,6 +702,11 @@ def gen_source_layer(of, name, n, layer, quantization):
                 of.write('        {0},\n'.format('true' if param else 'false'))
             else:
                 of.write('        {0},\n'.format(param))
+        of.write('    };\n\n')
+    elif layer.type is LayerType.CopyConcatenate:
+        of.write('    static fpga_layer *input_layers[] = {\n')
+        for layer_in in layer.layer_in:
+            of.write('        &layers[{0}],\n'.format(layer_in.index))
         of.write('    };\n\n')
 
     of.write('    struct fpga_layer& layer = layers[{0}];\n'.format(n))
@@ -732,6 +744,9 @@ def gen_source_layer(of, name, n, layer, quantization):
     elif layer.type is LayerType.Custom:
         of.write('    layer.custom_proc_ptr = &custom_callback_{0};\n'.format(layer.node_in._param.custom_param[2]))
         of.write('    layer.custom_param = &custom_param;\n')
+    elif layer.type is LayerType.CopyConcatenate:
+        of.write('    layer.input_layer_num = {0};\n'.format(len(layer.layer_in)))
+        of.write('    layer.input_layers = input_layers;\n')
     if layer.is_output:
         of.write('    output_layers[{0}] = &layer;\n'.format(output_index))
         output_index += 1
@@ -750,6 +765,7 @@ class LayerType(IntEnum):
     InnerProduct = auto()
     Flatten = auto()
     Concatenate = auto()
+    CopyConcatenate = auto()
     SoftMax = auto()
     Custom = auto()
     Other = auto()
@@ -767,6 +783,7 @@ class FPGALayer:
         self.output_addr_offset = 0
         self.is_output = False
         self.layer_in = []
+        self.index = -1
 
         concat_node = None
         # append runs
@@ -809,7 +826,16 @@ class FPGALayer:
                     self.run.append(run)
                     run = FPGARun()
                 if len(self.run) == 0:
-                    self.type = LayerType.Concatenate
+                    need_copy = False
+                    if len(node._output_dim) == 3:
+                        for node_in in node._input_nodes:
+                            if node_in._output_dim[2] % 8 != 0:
+                                need_copy = True
+                                break
+                    if need_copy:
+                        self.type = LayerType.CopyConcatenate
+                    else:
+                        self.type = LayerType.Concatenate
             elif node._type is NodeType.SoftMax:
                 self.type = LayerType.SoftMax
             elif node._type is NodeType.Custom:
@@ -873,20 +899,20 @@ class FPGANetwork:
                 prev_node_type = tl[index - 1]._type
             else:
                 prev_node_type = None
-            if node._type in (NodeType.Convolution, NodeType.LRN):
+            if (node._type is NodeType.Convolution or
+                node._type is NodeType.LRN):
                 pass
             elif node._type is NodeType.Pooling:
-                # Test if the pool node
-                # can merge with previous convolution node
+                # Test if the pool node can merge with previous convolution node
                 if (prev_node_type == NodeType.Convolution and
-                        node._param.pool == 0 and
-						layer_start_index != -1 and
-                        calc_conv_tiles(tl[index - 1]) == 1 and
-                        calc_pool_tiles(node) == 1):
+                    node._param.pool == 0 and
+                    layer_start_index != -1 and
+                    calc_conv_tiles(tl[index - 1]) == 1 and
+                    calc_pool_tiles(node) == 1):
                     index += 1
                     converted_node.append(node)
                     continue
-            elif node._type in (NodeType.UpSampling, NodeType.Power):
+            elif node._type is NodeType.UpSampling:
                 pass
             elif (node._type is NodeType.Concat and
                   (node._param.axis == 0 or
@@ -1048,12 +1074,12 @@ class FPGANetwork:
                 self.num_output_layers += 1
                 self.output_layer.append(layer)
             lr = LayerLiveRange(layer, index)
-            node_in = layer.node_in
-            for lr_in in live_ranges:
-                if lr_in.layer.node_out in node_in._input_nodes:
-                    lr.layer.layer_in.append(lr_in.layer)
-                    if lr_in.death_index < index:
-                        lr_in.death_index = index
+            for node_in in layer.node_in._input_nodes:
+                for lr_in in live_ranges:
+                    if node_in is lr_in.layer.node_out:
+                        lr.layer.layer_in.append(lr_in.layer)
+                        if lr_in.death_index < index:
+                            lr_in.death_index = index
             if lr.layer.is_output:
                 lr.death_index = len(self._layer) - 1
             live_ranges.append(lr)
@@ -1160,6 +1186,7 @@ class FPGANetwork:
         is_tensorflow = self.tensorflow_backend
         gen_source_header(of, name, self)
         for n, layer in enumerate(self._layer):
+            layer.index = n
             gen_source_layer(of, name, n, layer, self.quantization)
 
     def output_weights(self, of) -> None:
