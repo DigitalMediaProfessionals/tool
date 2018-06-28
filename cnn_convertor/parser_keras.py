@@ -61,7 +61,7 @@ def get_weights(netweight, layer_name, need_flip, weight_entry):
                 weight_names[i] = wn
                 break
         if i == len(weight_entry):
-            #This entry is not found, assert
+            # This entry is not found, assert
             logging.error('weight entry %s is not parsed!', wn.decode('utf8'))
     for name in weight_names:
         if name is not None:
@@ -287,7 +287,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     layer_type == 'SeparableConv2D'):
                 param.group = config['depth_multiplier']
                 if param.group > 1:
-                    logging.error('Depthwise/Separable Convolution with'\
+                    logging.error('Depthwise/Separable Convolution with'
                                   '\'depth_multiplier\' is not supported.')
                     raise cnn_exception.ParseError('Unsupported param')
             node.set_param(param)

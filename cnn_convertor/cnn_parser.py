@@ -17,14 +17,15 @@
 import logging
 from cnn_convertor import cnn_layer, parser_caffe, parser_keras
 
+
 def parse_network(
-        network_def: str,
-        network_data: str,
-        network_type: str,
-        custom_layer: list
-    ) -> cnn_layer.Network:
+    network_def: str,
+    network_data: str,
+    network_type: str,
+    custom_layer: list
+) -> cnn_layer.Network:
     network = cnn_layer.Network(custom_layer)
-    
+
     logging.info('Start parsing. Network type:' + network_type)
     if network_type == 'CAFFE':
         parser_caffe.parse_caffe_def(network, network_def)
@@ -36,4 +37,3 @@ def parse_network(
         network.build_traverse_list()
         network.calc_inout_sizes()
     return network
-    
