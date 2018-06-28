@@ -174,6 +174,7 @@ class LayerNode:
 class Network(object):
     """Represents a CNN.
     """
+
     def __init__(self, custom_layer) -> None:
         """Construct an empty CNN.
         """
@@ -277,13 +278,17 @@ class Network(object):
             h += param.pad[1] * 2
             if param.keras_padding == 'same':
                 if w % param.stride[0] == 0:
-                    pw = param.pad[0] + max(param.kernel_size[0] - param.stride[0], 0)
+                    pw = param.pad[0] + \
+                        max(param.kernel_size[0] - param.stride[0], 0)
                 else:
-                    pw = param.pad[0] + max(param.kernel_size[0] - w % param.stride[0], 0)
+                    pw = param.pad[0] + \
+                        max(param.kernel_size[0] - w % param.stride[0], 0)
                 if h % param.stride[1] == 0:
-                    ph = param.pad[1] + max(param.kernel_size[1] - param.stride[1], 0)
+                    ph = param.pad[1] + \
+                        max(param.kernel_size[1] - param.stride[1], 0)
                 else:
-                    ph = param.pad[1] + max(param.kernel_size[1] - h % param.stride[1], 0)
+                    ph = param.pad[1] + \
+                        max(param.kernel_size[1] - h % param.stride[1], 0)
                 param.pad = ((pw + 1) // 2, (ph + 1) // 2)
                 w += pw
                 h += ph
