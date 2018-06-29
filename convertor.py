@@ -98,9 +98,9 @@ network_type = network_type.upper()
 # strip double quotes
 if output_folder[0] == '"':
     output_folder = output_folder[1:-1]
+output_folder = os.path.abspath(os.path.join(absdir, output_folder))
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
-output_folder = os.path.abspath(output_folder)
 
 # parse network
 network = cnn_parser.parse_network(network_def, network_data, network_type,
