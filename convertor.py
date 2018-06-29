@@ -19,8 +19,7 @@ import os
 import configparser
 import logging
 from importlib import import_module
-from cnn_convertor import cnn_parser, fpga_layer
-
+from cnn_convertor import cnn_parser, fpga_layer, debug_keras
 
 # Handle parameters
 parser = argparse.ArgumentParser(description="DNN to FPGA convertor")
@@ -94,8 +93,12 @@ if not os.path.exists(output_folder):
 output_folder = os.path.abspath(output_folder)
 
 # parse network
-network = cnn_parser.parse_network(network_def, network_data, network_type,
-                                   custom_layer)
-fpga_net = fpga_layer.FPGANetwork(network, output_quantization)
-fpga_net.output_network(output_folder, network_name, output_gensource,
-                        output_gendoc, output_gengraph, graphviz_path)
+
+debug = debug_keras.layer_split(network_def, network_data, network_type,
+                                    custom_layer)
+
+# network = cnn_parser.parse_network(network_def, network_data, network_type,
+#                                    custom_layer)
+# fpga_net = fpga_layer.FPGANetwork(network, output_quantization)
+# fpga_net.output_network(output_folder, network_name, output_gensource,
+#                         output_gendoc, output_gengraph, graphviz_path)
