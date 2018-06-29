@@ -81,7 +81,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
                    caffe_net.input_shape[0].dim[1])
         node.set_input_dim(dim)
         node.set_output_dim(dim)
-        network._debug_node = caffe_net
+        network.debug_node = caffe_net
         top_map[caffe_net.input[0]] = node
     # Handle each layer node
     for i, layer in enumerate(caffe_net.layer):
@@ -134,7 +134,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
                    layer.input_param.shape[0].dim[1])
             node.set_input_dim(dim)
             node.set_output_dim(dim)
-            network._debug_node = caffe_net
+            network.debug_node = caffe_net
         elif node_type == NodeType.Convolution:
             param = cnn_layer.NodeParam()
             param.num_output = int(layer.convolution_param.num_output)
@@ -208,36 +208,36 @@ def parse_caffe_data(
             "Exception occurred while parsing Input network: %s", e)
         raise
 
-    network._debug_node = caffe_net
+    network.debug_node = caffe_net
     if len(caffe_net.layer) != 0:
         layers = caffe_net.layer
     else:
         layers = caffe_net.layers
 
-    for layer in network._traverse_list:
-        if (layer._type is not NodeType.Convolution and
-                layer._type is not NodeType.InnerProduct):
+    for layer in network.traverse_list:
+        if (layer.type is not NodeType.Convolution and
+                layer.type is not NodeType.InnerProduct):
             continue
-        caffe_layer = search_caffe_layer(layers, layer._name)
+        caffe_layer = search_caffe_layer(layers, layer.name)
         weight = np.float32(caffe_layer.blobs[0].data)
         if len(caffe_layer.blobs) > 1:
             bias = np.float32(caffe_layer.blobs[1].data)
         else:
-            bias = np.zeros((layer._output_dim[2]))
+            bias = np.zeros((layer.output_dim[2]))
         layer.set_weight_bias(weight, bias)
 
         # set parameters for BatchNorm node and Scale node
-        if layer._bn_node:
-            caffe_layer = search_caffe_layer(layers, layer._bn_node._name)
+        if layer.bn_node:
+            caffe_layer = search_caffe_layer(layers, layer.bn_node.name)
             mean = np.float32(caffe_layer.blobs[0].data)
             var = np.float32(caffe_layer.blobs[1].data)
             scale = caffe_layer.blobs[2].data[0]
             scale = (0 if scale == 0.0 else 1.0 / scale)
             mean *= scale
             var *= scale
-            layer._bn_node.set_mean_var(mean, var)
-        if layer._sc_node:
-            caffe_layer = search_caffe_layer(layers, layer._sc_node._name)
+            layer.bn_node.set_mean_var(mean, var)
+        if layer.sc_node:
+            caffe_layer = search_caffe_layer(layers, layer.sc_node.name)
             weight = np.float32(caffe_layer.blobs[0].data)
             bias = np.float32(caffe_layer.blobs[1].data)
-            layer._sc_node.set_weight_bias(weight, bias)
+            layer.sc_node.set_weight_bias(weight, bias)

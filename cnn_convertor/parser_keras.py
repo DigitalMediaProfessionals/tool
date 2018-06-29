@@ -43,7 +43,7 @@ def set_inplace_node(node, config):
     elif activation == 'softmax':
         node_type = NodeType.SoftMax
         input_node = node
-    in_node = cnn_layer.LayerNode(node._name + '_' + activation,
+    in_node = cnn_layer.LayerNode(node.name + '_' + activation,
                                   node_type, input_node)
     if input_node is None:
         node.set_activation_node(in_node)
@@ -106,7 +106,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
         layers = netdef['config']
     else:
         layers = netdef['config']['layers']
-    network._debug_node = netweight
+    network.debug_node = netweight
 
     # get data_format parameter
     for layer in layers:
@@ -178,7 +178,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             continue
         elif layer_type == 'BatchNormalization':
             # handle case that the up_node is not a convolution node
-            if up_node is None or up_node._type is not NodeType.Convolution:
+            if up_node is None or up_node.type is not NodeType.Convolution:
                 up_node = cnn_layer.LayerNode(layer_name, NodeType.Convolution,
                                               input_nodes)
                 param = cnn_layer.NodeParam()
@@ -228,8 +228,8 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 node_type = NodeType.Eltwise
         elif layer_type == 'Layer' and 'batch_input_shape' in config:
             node_type = NodeType.Input
-        elif layer_type in network._custom_layer:
-            custom_config = network._custom_layer[layer_type]
+        elif layer_type in network.custom_layer:
+            custom_config = network.custom_layer[layer_type]
             # set parameter type if it is the first time
             if type(custom_config[0]) is list:
                 c_type_map = {int: 'int', bool: 'bool', float: 'float'}
@@ -245,7 +245,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                         c_type = c_type_map[type_0]
                     param_list[param_name] = c_type
                 custom_config = (param_list, custom_config[1])
-                network._custom_layer[layer_type] = custom_config
+                network.custom_layer[layer_type] = custom_config
             node_type = NodeType.Custom
         else:
             if layer_type not in type_map:
@@ -366,7 +366,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             node.set_param(param)
         elif node_type == NodeType.Custom:
             param = cnn_layer.NodeParam()
-            custom_config = network._custom_layer[layer_type]
+            custom_config = network.custom_layer[layer_type]
             custom_param = (
                 OrderedDict({x: config[x] for x in custom_config[0]}),
                 custom_config[1], layer_type)
