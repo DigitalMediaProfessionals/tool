@@ -12,7 +12,8 @@ def parse_network(
         network_def: str,
         network_data: str,
         network_type: str,
-        custom_layer: list
+        custom_layer: list, 
+        debug
     ) -> cnn_layer.Network:
     network = cnn_layer.Network(custom_layer)
     

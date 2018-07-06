@@ -24,9 +24,11 @@ from cnn_convertor import cnn_parser, fpga_layer, debug_keras
 # Handle parameters
 parser = argparse.ArgumentParser(description="DNN to FPGA convertor")
 parser.add_argument("INPUT_INI", type=str, help="Input ini file")
+parser.add_argument("--debug", type=str, help="output keras")
 args = parser.parse_args()
-
-
+debug=args.debug
+if debug:
+    print("debug mode")
 # parse config file
 config = configparser.ConfigParser(strict=False,
                                    inline_comment_prefixes=('#', ';'))
@@ -94,11 +96,11 @@ output_folder = os.path.abspath(output_folder)
 
 # parse network
 
-debug = debug_keras.layer_split(network_def, network_data, network_type,
-                                    custom_layer)
+# debug = debug_keras.layer_split(network_def, network_data, network_type,
+#                                     custom_layer)
 
-# network = cnn_parser.parse_network(network_def, network_data, network_type,
-#                                    custom_layer)
-# fpga_net = fpga_layer.FPGANetwork(network, output_quantization)
-# fpga_net.output_network(output_folder, network_name, output_gensource,
-#                         output_gendoc, output_gengraph, graphviz_path)
+network = cnn_parser.parse_network(network_def, network_data, network_type,
+                                   custom_layer, debug)
+fpga_net = fpga_layer.FPGANetwork(network, output_quantization)
+fpga_net.output_network(output_folder, network_name, output_gensource,
+                        output_gendoc, output_gengraph, graphviz_path)
