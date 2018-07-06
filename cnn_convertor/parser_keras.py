@@ -13,6 +13,7 @@ import json
 import numpy as np
 
 
+
 NodeType = cnn_layer.NodeType
 padding = (0, 0)
 

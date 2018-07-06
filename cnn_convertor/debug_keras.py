@@ -4,7 +4,10 @@ from keras import models
 from keras.layers import Input
 from keras.models import load_model
 from keras.utils.generic_utils import CustomObjectScope, deserialize_keras_object
+from keras.layers import deserialize as layer_from_config
 
+
+import os.path
 import h5py
 import json
 import numpy as np
@@ -21,37 +24,117 @@ sess = tf.Session(config=config)
 set_session(sess)  # set this TensorFlow session as the default session for Keras
 
 
-def deserialize(config, custom_objects=None):
-	"""Instantiate a layer from a config dictionary.
+def get_input(layer_name):
+		filename = 'output_'+layer_name+'.npy'
+		if os.path.isfile(filename):
+			data = np.load('output_'+layer_name+'.npy')
+		else:
+			print('NO INPUT DATA FOUND')	
+			data = misc.imread('image_019.jpg')
+			data = np.asarray([data])
+		return data
 
-	# Arguments
-		config: dict of the form {'class_name': str, 'config': dict}
-		custom_objects: dict mapping class names (or function names)
-			of custom (non-Keras) objects to class/functions
 
-	# Returns
-		Layer instance (may be Model, Sequential, Layer...)
-	"""
-	from .. import models
+
+def layer_split(fpga_network):
+	print('wewqt')
+
+	network_def = 'C:\\Alex\\Work\\fpga_perf\\tool\\network\\mobilenet.h5'
+
+	f = h5py.File(network_def, mode='r')
+	model_config = f.attrs.get('model_config')
+	model_config = json.loads(model_config.decode('utf-8'))
+
 	globs = globals()  # All layers.
 	globs['Model'] = models.Model
 	globs['Sequential'] = models.Sequential
-	return deserialize_keras_object(config,
-									module_objects=globs,
-									custom_objects=custom_objects,
-									printable_module_name='layer')
+	custom_objects = {'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}
+
+	globs['Conv2D']= layers.Conv2D
+	globs['relu6']=keras.applications.mobilenet.relu6
+	globs['DepthwiseConv2D']=keras.applications.mobilenet.DepthwiseConv2D
+	
+	model_load = load_model(network_def, custom_objects=custom_objects)	
+	model_load_weights={}
+	for layer in model_load.layers:
+		model_load_weights[layer.name]=layer.get_weights()
+	# model_load1 = keras.models.model_from_config(model_config, custom_objects=custom_objects)  #use the other one for  real weights	
+	print('qwerty')
+	print('qwerty')
+	# model_weights = model_load.get_weights()
+	
+	fpga_network_layers={}
+
+	for layer in fpga_network._layer:
+		K.clear_session()
+		first_layer = layer.node_in
+		last_layer = layer.node_out
+		input_dim = first_layer._input_dim
+		input_nodes = first_layer._input_nodes
+		name = first_layer._name
+		
+		keras_input = Input(shape=input_dim)
+		keras_layer = model_load.get_layer(name)
+		keras_layer_class = keras_layer.__class__
+		keras_layer_config = keras_layer.get_config()
+		with CustomObjectScope({'relu6': relu6}):
+			keras_out_layer = keras_layer_class(**keras_layer_config)(keras_input)
+			# keras_out_layer.set_weights(keras_layer.get_weights())
+
+		if first_layer._bn_node:
+			sub_layer_name = first_layer._bn_node._name
+			keras_layer = model_load.get_layer(sub_layer_name)
+			keras_layer_class = keras_layer.__class__
+			keras_layer_config = keras_layer.get_config()
+			with CustomObjectScope({'relu6': relu6}):
+				keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
+				# keras_out_layer.set_weights(keras_layer.get_weights())
+
+		if first_layer._act_node:
+			sub_layer_name = first_layer._act_node._name
+			keras_layer = model_load.get_layer(sub_layer_name)
+			keras_layer_class = keras_layer.__class__
+			keras_layer_config = keras_layer.get_config()
+			with CustomObjectScope({'relu6': relu6}):
+				keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
+				# keras_out_layer.set_weights(keras_layer.get_weights())
+
+		keras_model = Model(inputs = keras_input, outputs = keras_out_layer)
+		for layer in keras_model.layers:
+			layer_name = layer.name
+			model_load_weights = model_load_weights[layer_name]
+			layer.set_weights(model_load_weights)
 
 
-def get_input(i, layer_type, shape):
-	if i==0: 
-		data = misc.imread('image_019.jpg')
-		data = np.asarray([data])
-	else:
-		data = np.load('output_'+str(i-1)+'.npy')
-	return data
+		input_data=[]
+		input_nodes =  layer.layer_in
+		for node in input_nodes:
+			input_node_name = node.node_in._name
+			input_data.append(get_input(input_node_name))
+		print("Dfs")
+		if input_data:
+			prediction = keras_model.predict(input_data)
+			np.save('output_'+name+'.npy', prediction)
+
+		keras_model.save('keras_networks/'+name+'.h5')
+
+	print('sadfsad')
 
 
-def layer_split(network_def, network_data, network_type,
+
+
+
+
+
+
+
+
+
+
+
+
+
+def layer_split_old(network_def, network_data, network_type,
 									custom_layer):
 	print('qwerty')
 	print('qwerty')
