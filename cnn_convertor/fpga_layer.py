@@ -946,12 +946,14 @@ class FPGANetwork(object):
             elif (node.type is NodeType.Concat and
                   (node.param.axis == 0 or
                    len(node.input_dim) == 3 and node.param.axis == 2)):
-                pass
+                node.output_size = sum(
+                        [x.output_size for x in node.input_nodes])
             elif node.type is NodeType.Eltwise:
                 pass
             elif node.type is NodeType.InnerProduct:
                 pass
             elif node.type is NodeType.Flatten:
+                node.output_size = node.input_nodes[0].output_size
                 dim = node.input_dim
                 if (dim[-1] <= 8 or
                         (len(dim) == 3 and dim[0] == 1 and dim[1] == 1)):
@@ -959,6 +961,7 @@ class FPGANetwork(object):
                     converted_node.append(node)
                     continue
             elif node.type is NodeType.Reshape:
+                node.output_size = node.input_nodes[0].output_size
                 index += 1
                 converted_node.append(node)
                 continue
