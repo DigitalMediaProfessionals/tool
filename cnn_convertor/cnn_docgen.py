@@ -1,9 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-------------------------------------------------------------
- Copyright(c) 2017 by Digital Media Professionals Inc.
- All rights reserved.
-------------------------------------------------------------
+    Copyright 2018 Digital Media Professionals Inc.
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 """
 
 import os
@@ -2522,14 +2531,14 @@ In the following section, one can find the conversion results of the network.In 
   + where network is the instance of the current network class
 
 
-- To run the network : 
- + network.run_network(); 
+- To run the network :
+ + network.run_network();
 
 
-- To get the results : 
+- To get the results :
 
 """
-result_normal = r"""  + network.get_final_output(tensor); 
+result_normal = r"""  + network.get_final_output(tensor);
   + where tensor is a vector of floats, allocated in the network function"""
 
 table_header = r"""
@@ -2539,6 +2548,7 @@ table_header = r"""
 | :- | :- | :- | :- | :- | :- | -: | -: | -: |
 """
 
+
 def output_page(of, network_name, gengraph, fpga_net):
     of.write(page_header.format(proj_name=network_name))
     if fpga_net.num_output_layers == 1:
@@ -2546,23 +2556,25 @@ def output_page(of, network_name, gengraph, fpga_net):
     else:
         for i, layer in enumerate(fpga_net.output_layer):
             of.write('  + network.get_final_output(tensor, {0});\n'.format(i))
-            of.write('  + will return the result of {0}\n'.format(layer.node_in._name))
-        of.write('  + where tensor is a vector of floats, allocated in the network function')
+            of.write(
+                '  + will return the result of {0}\n'.format(layer.node_in.name))
+        of.write(
+            '  + where tensor is a vector of floats, allocated in the network function')
     total_mul_ops = 0
     total_add_ops = 0
     of.write(table_header)
-    for n, layer in enumerate(fpga_net._layer):
+    for n, layer in enumerate(fpga_net.layer):
         of.write('| {0} | FPGA-Layer | {1} | {2} | {3} | - | - | - | - |\n'.format(
                  n,
                  str(layer.type),
-                 str(layer.node_in._input_dim),
-                 str(layer.node_out._output_dim)))
+                 str(layer.node_in.input_dim),
+                 str(layer.node_out.output_dim)))
         for i, run in enumerate(layer.run):
             if run.conv is not None:
-                c = run.conv._input_dim[2]
-                d = run.conv._output_dim
-                k = run.conv._param.kernel_size
-                if run.conv._param.group <= 1:
+                c = run.conv.input_dim[2]
+                d = run.conv.output_dim
+                k = run.conv.param.kernel_size
+                if run.conv.param.group <= 1:
                     mul_ops = d[0] * d[1] * k[0] * k[1] * c * d[2]
                 else:
                     mul_ops = d[0] * d[1] * k[0] * k[1] * c
@@ -2571,93 +2583,101 @@ def output_page(of, network_name, gengraph, fpga_net):
                 total_add_ops += add_ops
                 of.write('| {0}-{1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} | {9} |\n'.format(
                          n, i,
-                         run.conv._name,
-                         str(run.conv._type),
-                         str(run.conv._input_dim),
-                         str(run.conv._output_dim),
+                         run.conv.name,
+                         str(run.conv.type),
+                         str(run.conv.input_dim),
+                         str(run.conv.output_dim),
                          str(k),
-                         fpga_layer.get_weight_size(run.conv, fpga_net.quantization),
+                         fpga_layer.get_weight_size(
+                             run.conv, fpga_net.quantization),
                          mul_ops, add_ops))
             if run.pool is not None:
-                d = run.pool._output_dim
-                k = run.pool._param.kernel_size
-                if str(run.pool._type) == 'UpSampling':
+                d = run.pool.output_dim
+                k = run.pool.param.kernel_size
+                if str(run.pool.type) == 'UpSampling':
                     mul_ops = 0
                     add_ops = 0
-                elif run.pool._param.pool == 0: #max pooling
+                elif run.pool.param.pool == 0:  # max pooling
                     mul_ops = 0
                     add_ops = d[0] * d[1] * d[2] * (k[0] * k[1] - 1)
-                else: # avg pooling
+                else:  # avg pooling
                     mul_ops = d[0] * d[1] * d[2]
                     add_ops = d[0] * d[1] * d[2] * (k[0] * k[1] - 1)
                 total_mul_ops += mul_ops
                 total_add_ops += add_ops
                 of.write('| {0}-{1} | {2} | {3} | {4} | {5} | {6} | - | {7} | {8} |\n'.format(
                          n, i,
-                         run.pool._name,
-                         str(run.pool._type),
-                         str(run.pool._input_dim),
-                         str(run.pool._output_dim),
+                         run.pool.name,
+                         str(run.pool.type),
+                         str(run.pool.input_dim),
+                         str(run.pool.output_dim),
                          str(k),
                          mul_ops, add_ops))
         if layer.type is fpga_layer.LayerType.InnerProduct:
-            c = layer.node_in._input_dim
-            d = layer.node_in._output_dim
+            c = layer.node_in.input_dim
+            d = layer.node_in.output_dim
             mul_ops = c[-1] * d[-1]
             add_ops = mul_ops
             total_mul_ops += mul_ops
             total_add_ops += add_ops
             of.write('| {0}-0 | {1} | {2} | {3} | {4} | - | {5} | {6} | {7} |\n'.format(
-                     n, layer.node_in._name,
-                     str(layer.node_in._type),
-                     str(layer.node_in._input_dim),
-                     str(layer.node_in._output_dim),
+                     n, layer.node_in.name,
+                     str(layer.node_in.type),
+                     str(layer.node_in.input_dim),
+                     str(layer.node_in.output_dim),
                      fpga_layer.get_fc_weight_size(layer.node_in),
                      mul_ops, add_ops))
-    of.write('| SUM | - | - | - | - | - | - | {0} | {1} |\n'.format(total_mul_ops, total_add_ops))
+    of.write(
+        '| SUM | - | - | - | - | - | - | {0} | {1} |\n'.format(total_mul_ops, total_add_ops))
     of.write('\n')
     if gengraph:
         of.write('\\section Graph\n')
         of.write('\\dotfile {0}.dot\n'.format(network_name))
         of.write('\n')
-    of.write('***********************************************************************************/\n')
-    
+    of.write(
+        '***********************************************************************************/\n')
+
+
 def graph_name(name: str) -> str:
     return name.replace('/', '_')
-    
+
+
 def output_graph(of, fpga_net):
-    tl = fpga_net.original_net._traverse_list
+    tl = fpga_net.original_net.traverse_list
     of.write('digraph G{\n')
-    for n, layer in enumerate(fpga_net._layer):
+    for n, layer in enumerate(fpga_net.layer):
         of.write('    subgraph cluster_{0}{{\n'.format(n))
         of.write('        style = filled;\n'
                  '        color = lightgrey;\n'
                  '        node[style = filled,color = white];\n')
-        
+
         if layer.node_in == layer.node_out:
-            of.write('        {0}\n'.format(graph_name(layer.node_in._name)))
+            of.write('        {0}\n'.format(graph_name(layer.node_in.name)))
             node_list = [layer.node_in]
         else:
             node_list = tl[tl.index(layer.node_in):tl.index(layer.node_out)]
             for node in node_list:
-                for out_node in node._output_nodes:
-                    of.write('        {0}->{1}\n'.format(graph_name(node._name), graph_name(out_node._name)))
+                for out_node in node.output_nodes:
+                    of.write(
+                        '        {0}->{1}\n'.format(graph_name(node.name), graph_name(out_node.name)))
         of.write('        label = "Layer_{0}"\n'.format(n))
         of.write('    }\n')
-        if len(layer.node_in._input_nodes) == 1:
-            in_node = layer.node_in._input_nodes[0]
-            for out_node in in_node._output_nodes:
+        if len(layer.node_in.input_nodes) == 1:
+            in_node = layer.node_in.input_nodes[0]
+            for out_node in in_node.output_nodes:
                 if out_node in node_list:
-                    of.write('    {0}->{1}\n'.format(graph_name(in_node._name), graph_name(out_node._name)))
+                    of.write(
+                        '    {0}->{1}\n'.format(graph_name(in_node.name), graph_name(out_node.name)))
         else:
-            node =layer.node_in
-            for in_node in node._input_nodes:
-                of.write('    {0}->{1}\n'.format(graph_name(in_node._name), graph_name(node._name)))
+            node = layer.node_in
+            for in_node in node.input_nodes:
+                of.write(
+                    '    {0}->{1}\n'.format(graph_name(in_node.name), graph_name(node.name)))
         of.write('\n')
     of.write('}\n')
-        
 
-def output_doc(output_folder: str, network_name: str, 
+
+def output_doc(output_folder: str, network_name: str,
                gengraph: bool, graphviz_path: str, fpga_net) -> None:
     output_folder = os.path.join(output_folder, 'doc')
     if not os.path.exists(output_folder):
@@ -2667,7 +2687,7 @@ def output_doc(output_folder: str, network_name: str,
     if gengraph:
         graph_file_name = os.path.join(output_folder,
                                        network_name + '.dot')
-    
+
     cf = open(config_file_name, 'w')
     cf.write(doxy_config.format(proj_name=network_name,
                                 dot_path=graphviz_path))
