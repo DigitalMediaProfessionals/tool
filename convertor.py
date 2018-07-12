@@ -109,7 +109,7 @@ if not os.path.exists(output_folder):
 #                                     custom_layer)
 
 network = cnn_parser.parse_network(network_def, network_data, network_type,
-                                   custom_layer, debug)
+                                   custom_layer)
 fpga_net = fpga_layer.FPGANetwork(network, output_quantization)
 
 debug_keras.layer_split(fpga_net, network_def)

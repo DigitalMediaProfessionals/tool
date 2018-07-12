@@ -39,10 +39,20 @@ def get_input(layer_name):
 		print('NO INPUT DATA FOUND')	
 		# data = misc.imread('image_019.jpg')
 		# data = misc.imread('im1.jpg')
+		
+		# pose
 		# data = cv2.imread('im1.jpg')
-		data = misc.imread('image_019.jpg')
-		# data = cv2.rollaxis(data, (368,432))
+		# data = np.asarray([data])
+
+
+		#mobilenet
+		data = cv2.imread('image_019.jpg')
 		data = np.asarray([data])
+		data = (data.astype(np.float32)-127.5)*0.0078431
+
+
+
+
 	return data
 
 def reorder(dims):
@@ -78,28 +88,28 @@ def layer_split(fpga_network, keras_net):
 	fpga_network_layers={}
 
 	i=0
-	for layer in fpga_network._layer:
+	for layer in fpga_network.layer:
 		K.clear_session()
 
 		first_layer = layer.node_in
 		last_layer = layer.node_out
 
 		
-		name = first_layer._name 
+		name = first_layer.name 
 		if name[-6:]=="_point":
 			print('pointlayer')
 			continue
 		
-		input_nodes = first_layer._input_nodes
+		input_nodes = first_layer.input_nodes
 		if len(input_nodes)>1:
 			input_dims = []
 			for input_node in input_nodes:
-				input_dims.append(reorder(input_node._output_dim))
+				input_dims.append(reorder(input_node.output_dim))
 			keras_input = []
 			for input_dim in input_dims:
 				keras_input.append(Input(shape=input_dim))
 		else:
-			input_dim = reorder(first_layer._input_dim)
+			input_dim = reorder(first_layer.input_dim)
 			keras_input = Input(shape=input_dim)
 
 		
@@ -143,7 +153,7 @@ def layer_split(fpga_network, keras_net):
 			depth_model.set_weights(depth_weights)
 
 			point_name = name+'_point'
-			point_layer_fpga = fpga_network._layer[i+1]
+			point_layer_fpga = fpga_network.layer[i+1]
 
 			node_layers = []
 			node_layers.append(point_layer_fpga.node_in)
@@ -161,7 +171,7 @@ def layer_split(fpga_network, keras_net):
 					with CustomObjectScope({'relu6': relu6}):
 						keras_out_layer = Conv2D(name=point_name, kernel_size=(1,1), **pointconfig)(keras_out_layer)
 				else:
-					node_layer_name = node_layer._name
+					node_layer_name = node_layer.name
 					try:
 						keras_layer = model_load.get_layer(node_layer_name)
 					except:
@@ -172,8 +182,8 @@ def layer_split(fpga_network, keras_net):
 						keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 			
-				if node_layer._bn_node:
-					sub_layer_name = node_layer._bn_node._name
+				if node_layer.bn_node:
+					sub_layer_name = node_layer.bn_node.name
 					keras_layer = model_load.get_layer(sub_layer_name)
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
@@ -181,8 +191,8 @@ def layer_split(fpga_network, keras_net):
 						keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 
-				if node_layer._act_node:
-					sub_layer_name = node_layer._act_node._name
+				if node_layer.act_node:
+					sub_layer_name = node_layer.act_node.name
 					keras_layer = model_load.get_layer(sub_layer_name)
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
@@ -207,7 +217,7 @@ def layer_split(fpga_network, keras_net):
 			input_data=[]
 			input_nodes =  layer.layer_in
 			for node in input_nodes:
-				input_node_name = node.node_in._name
+				input_node_name = node.node_in.name
 				input_data.append(get_input(input_node_name))
 
 			depth_predict = depth_model.predict(input_data)
@@ -232,7 +242,7 @@ def layer_split(fpga_network, keras_net):
 
 			keras_out_layer = keras_input
 			for node_layer in node_layers:
-				node_layer_name = node_layer._name
+				node_layer_name = node_layer.name
 				try:
 					keras_layer = model_load.get_layer(node_layer_name)
 				except:
@@ -243,8 +253,8 @@ def layer_split(fpga_network, keras_net):
 					keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
 					# keras_out_layer.set_weights(keras_layer.get_weights())
 			
-				if node_layer._bn_node:
-					sub_layer_name = node_layer._bn_node._name
+				if node_layer.bn_node:
+					sub_layer_name = node_layer.bn_node.name
 					keras_layer = model_load.get_layer(sub_layer_name)
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
@@ -252,8 +262,8 @@ def layer_split(fpga_network, keras_net):
 						keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 
-				if node_layer._act_node:
-					sub_layer_name = node_layer._act_node._name
+				if node_layer.act_node:
+					sub_layer_name = node_layer.act_node.name
 					keras_layer = model_load.get_layer(sub_layer_name)
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
@@ -274,123 +284,123 @@ def layer_split(fpga_network, keras_net):
 			input_data=[]
 			input_nodes =  layer.layer_in
 			for node in input_nodes:
-				input_node_name = node.node_in._name
+				input_node_name = node.node_in.name
 				input_data.append(get_input(input_node_name))
 
 
 			try:
 				prediction = keras_model.predict(input_data)
-				prediction.dump('debug/keras_outputs/'+str(i)+'_output_'+name+'.npy')
+				prediction.dump('debug/keras_outputs/'+str(i).zfill(3)+'_output_'+name+'.npy')
 			except:
 				print("error")
 			
 
-			keras_model.save('debug/keras_networks/layer_'+str(i)+'_'+name+'.h5')
+			keras_model.save('debug/keras_networks/layer_'+str(i).zfill(3)+'_'+name+'.h5')
 			i+=1
 
 	print('Done.')
 
 
 
-def layer_split_old(network_def, network_data, network_type,
-									custom_layer):
-	print('qwerty')
-	print('qwerty')
-	import re
-	regex = r"^[^/:]*"
+# def layer_split_old(network_def, network_data, network_type,
+# 									custom_layer):
+# 	print('qwerty')
+# 	print('qwerty')
+# 	import re
+# 	regex = r"^[^/:]*"
 
-	network_def = 'C:\\Alex\\Work\\fpga_perf\\tool\\network\\mobilenet.h5'
+# 	network_def = 'C:\\Alex\\Work\\fpga_perf\\tool\\network\\mobilenet.h5'
 
-	f = h5py.File(network_def, mode='r')
-	model_config = f.attrs.get('model_config')
-	model_config = json.loads(model_config.decode('utf-8'))
+# 	f = h5py.File(network_def, mode='r')
+# 	model_config = f.attrs.get('model_config')
+# 	model_config = json.loads(model_config.decode('utf-8'))
 
-	globs = globals()  # All layers.
-	globs['Model'] = models.Model
-	globs['Sequential'] = models.Sequential
-	custom_objects = {'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}
+# 	globs = globals()  # All layers.
+# 	globs['Model'] = models.Model
+# 	globs['Sequential'] = models.Sequential
+# 	custom_objects = {'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}
 
-	globs['Conv2D']= layers.Conv2D
-	globs['relu6']=keras.applications.mobilenet.relu6
-	globs['DepthwiseConv2D']=keras.applications.mobilenet.DepthwiseConv2D
+# 	globs['Conv2D']= layers.Conv2D
+# 	globs['relu6']=keras.applications.mobilenet.relu6
+# 	globs['DepthwiseConv2D']=keras.applications.mobilenet.DepthwiseConv2D
 	
-	# model_load = load_model(network_def, custom_objects=custom_objects)	
-	model_load = keras.models.model_from_config(model_config, custom_objects=custom_objects)  #use the other one for  real weights	
-	model_weights = model_load.get_weights()
+# 	# model_load = load_model(network_def, custom_objects=custom_objects)	
+# 	model_load = keras.models.model_from_config(model_config, custom_objects=custom_objects)  #use the other one for  real weights	
+# 	model_weights = model_load.get_weights()
 	
-	fpga_network_layers={}
+# 	fpga_network_layers={}
 
 
-	for i, layer in enumerate(model_config['config']['layers']):
-		K.clear_session()
-		layer_type = layer['class_name']
-		layer_name = layer['name']
+# 	for i, layer in enumerate(model_config['config']['layers']):
+# 		K.clear_session()
+# 		layer_type = layer['class_name']
+# 		layer_name = layer['name']
 
 
-		if layer_type in ('BatchNormalization', 'Activation', 'Dropout', 'Reshape') :
-			top_layer = layer
-			top_layer_type = layer_type
-			if layer_type=='Activation':
-				if layer['config']['activation']=='softmax':
-					fpga_network_layers[layer_name] = [layer]
-				else:
-					while top_layer_type in ('BatchNormalization', 'Activation', 'Dropout', 'Reshape') :
-						top_layer_name = top_layer['inbound_nodes'][0][0][0]
-						for l in model_config['config']['layers']:
-							if l['name'] == top_layer_name:
-								top_layer = l
-								break
-						top_layer_type = top_layer['class_name']
-					# top_layer_name = top_layer['name']
-					fpga_network_layers[top_layer_name].append(layer)
-			else:
-			# search for existing input and output nodes
-				while top_layer_type in ('BatchNormalization', 'Activation', 'Dropout', 'Reshape') :
-					top_layer_name = top_layer['inbound_nodes'][0][0][0]
-					for l in model_config['config']['layers']:
-						if l['name'] == top_layer_name:
-							top_layer = l
-							break
-					top_layer_type = top_layer['class_name']
-				# top_layer_name = top_layer['name']
-				fpga_network_layers[top_layer_name].append(layer)
-		else:
-			input_shape = model_load.layers[i].input_shape[1:]
-			input_layer = Input(shape=input_shape)
-			fpga_network_layers[layer_name] = [layer]
+# 		if layer_type in ('BatchNormalization', 'Activation', 'Dropout', 'Reshape') :
+# 			top_layer = layer
+# 			top_layer_type = layer_type
+# 			if layer_type=='Activation':
+# 				if layer['config']['activation']=='softmax':
+# 					fpga_network_layers[layer_name] = [layer]
+# 				else:
+# 					while top_layer_type in ('BatchNormalization', 'Activation', 'Dropout', 'Reshape') :
+# 						top_layer_name = top_layer['inbound_nodes'][0][0][0]
+# 						for l in model_config['config']['layers']:
+# 							if l['name'] == top_layer_name:
+# 								top_layer = l
+# 								break
+# 						top_layer_type = top_layer['class_name']
+# 					# top_layer_name = top_layer['name']
+# 					fpga_network_layers[top_layer_name].append(layer)
+# 			else:
+# 			# search for existing input and output nodes
+# 				while top_layer_type in ('BatchNormalization', 'Activation', 'Dropout', 'Reshape') :
+# 					top_layer_name = top_layer['inbound_nodes'][0][0][0]
+# 					for l in model_config['config']['layers']:
+# 						if l['name'] == top_layer_name:
+# 							top_layer = l
+# 							break
+# 					top_layer_type = top_layer['class_name']
+# 				# top_layer_name = top_layer['name']
+# 				fpga_network_layers[top_layer_name].append(layer)
+# 		else:
+# 			input_shape = model_load.layers[i].input_shape[1:]
+# 			input_layer = Input(shape=input_shape)
+# 			fpga_network_layers[layer_name] = [layer]
 
-	outputs_layer_map = {}
-	for key, value in fpga_network_layers.items():
-		outputs_layer_map[value[-1]['name']] = key	
+# 	outputs_layer_map = {}
+# 	for key, value in fpga_network_layers.items():
+# 		outputs_layer_map[value[-1]['name']] = key	
 
-	network_outputs={}
-	for key, value in list(fpga_network_layers.items())[1:]:
-		print(0)
-		print(value)
-		first_layer_name = value[0]['name']
-		input_shape = model_load.get_layer(first_layer_name).input_shape
-		input_layer=Input(shape=input_shape[1:])
-		print(1)
-		network_output = input_layer
-		for layer in value:
-			layer_config = layer['config']
-			layer_method=getattr(keras.layers, layer['class_name'])
-			with CustomObjectScope({'relu6': relu6}):
-				network_output = layer_method(**layer_config)(network_output)
-		print(2)
-		model = Model(inputs = input_layer, outputs = network_output)
-		print(2.5)
-		for layer in model.layers[1:]:
-			layer.set_weights(model_load.get_layer(layer.name).get_weights())
-		print(3)
-		inbound_nodes = []
-		inbound_node_names = [x[0] for x in layer['inbound_nodes'][0]]
-		for inbound_node_name in inbound_node_names:
-			inbound_node = outputs_layer_map[inbound_node_name]
-			inbound_node_data = network_outputs['inbound_node']
-			inbound_nodes.append(inbound_node_data)
-		print(4)
-		layer_output = model.predict(inbound_nodes)
+# 	network_outputs={}
+# 	for key, value in list(fpga_network_layers.items())[1:]:
+# 		print(0)
+# 		print(value)
+# 		first_layer_name = value[0]['name']
+# 		input_shape = model_load.get_layer(first_layer_name).input_shape
+# 		input_layer=Input(shape=input_shape[1:])
+# 		print(1)
+# 		network_output = input_layer
+# 		for layer in value:
+# 			layer_config = layer['config']
+# 			layer_method=getattr(keras.layers, layer['class_name'])
+# 			with CustomObjectScope({'relu6': relu6}):
+# 				network_output = layer_method(**layer_config)(network_output)
+# 		print(2)
+# 		model = Model(inputs = input_layer, outputs = network_output)
+# 		print(2.5)
+# 		for layer in model.layers[1:]:
+# 			layer.set_weights(model_load.get_layer(layer.name).get_weights())
+# 		print(3)
+# 		inbound_nodes = []
+# 		inbound_node_names = [x[0] for x in layer['inbound_nodes'][0]]
+# 		for inbound_node_name in inbound_node_names:
+# 			inbound_node = outputs_layer_map[inbound_node_name]
+# 			inbound_node_data = network_outputs['inbound_node']
+# 			inbound_nodes.append(inbound_node_data)
+# 		print(4)
+# 		layer_output = model.predict(inbound_nodes)
 		
 
 		
@@ -404,88 +414,88 @@ def layer_split_old(network_def, network_data, network_type,
 
 
 
-def layer_split1d(network_def, network_data, network_type,
-									custom_layer):
-	print('qwerty')
-	print('qwerty')
+# def layer_split1d(network_def, network_data, network_type,
+# 									custom_layer):
+# 	print('qwerty')
+# 	print('qwerty')
 
-	network_def = 'C:\\Alex\\Work\\fpga_perf\\tool\\network\\mobilenet.h5'
+# 	network_def = 'C:\\Alex\\Work\\fpga_perf\\tool\\network\\mobilenet.h5'
 
-	f = h5py.File(network_def, mode='r')
-	model_config = f.attrs.get('model_config')
-	model_config = json.loads(model_config.decode('utf-8'))
+# 	f = h5py.File(network_def, mode='r')
+# 	model_config = f.attrs.get('model_config')
+# 	model_config = json.loads(model_config.decode('utf-8'))
 
-	globs = globals()  # All layers.
-	globs['Model'] = models.Model
-	globs['Sequential'] = models.Sequential
-	custom_objects = {'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}
+# 	globs = globals()  # All layers.
+# 	globs['Model'] = models.Model
+# 	globs['Sequential'] = models.Sequential
+# 	custom_objects = {'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}
 
-	globs['Conv2D']= layers.Conv2D
-	globs['relu6']=keras.applications.mobilenet.relu6
-	globs['DepthwiseConv2D']=keras.applications.mobilenet.DepthwiseConv2D
+# 	globs['Conv2D']= layers.Conv2D
+# 	globs['relu6']=keras.applications.mobilenet.relu6
+# 	globs['DepthwiseConv2D']=keras.applications.mobilenet.DepthwiseConv2D
 	
-	model_load = load_model(network_def, custom_objects=custom_objects)		
-	print('qwerty')
-	print('qwerty')
-	model_weights = model_load.get_weights()
+# 	model_load = load_model(network_def, custom_objects=custom_objects)		
+# 	print('qwerty')
+# 	print('qwerty')
+# 	model_weights = model_load.get_weights()
 	
 
-	for i, layer in enumerate(model_config['config']['layers']):
-		K.clear_session()
-		layer_type = layer['class_name']
-		layer_config = layer['config']
-		layer_method=getattr(keras.layers, layer['class_name'])
+# 	for i, layer in enumerate(model_config['config']['layers']):
+# 		K.clear_session()
+# 		layer_type = layer['class_name']
+# 		layer_config = layer['config']
+# 		layer_method=getattr(keras.layers, layer['class_name'])
 		
-		if layer_type == 'InputLayer' and i==0:
-			layer_config['name']="input"
-			input_data = get_input(i, layer_type, shape=model_load.layers[i].input_shape[1:] )
-		else:
-			input_data = get_input(i, layer_type, shape=model_load.layers[i].input_shape[1:] )
-		input_layer=Input(shape=model_load.layers[i].input_shape[1:])
-		with CustomObjectScope({'relu6': relu6}):
-			output_layer = layer_method(**layer_config)(input_layer)
-		network = Model(inputs=input_layer, outputs = output_layer)
-		network_weights = network.get_weights()
-		if len(network_weights)>0:
-			updated_weights=[]
-			for w in range(len(network_weights)):
-				updated_weights.append(model_weights[0])
-				model_weights.pop(0)
-			network.set_weights(updated_weights)
+# 		if layer_type == 'InputLayer' and i==0:
+# 			layer_config['name']="input"
+# 			input_data = get_input(i, layer_type, shape=model_load.layers[i].input_shape[1:] )
+# 		else:
+# 			input_data = get_input(i, layer_type, shape=model_load.layers[i].input_shape[1:] )
+# 		input_layer=Input(shape=model_load.layers[i].input_shape[1:])
+# 		with CustomObjectScope({'relu6': relu6}):
+# 			output_layer = layer_method(**layer_config)(input_layer)
+# 		network = Model(inputs=input_layer, outputs = output_layer)
+# 		network_weights = network.get_weights()
+# 		if len(network_weights)>0:
+# 			updated_weights=[]
+# 			for w in range(len(network_weights)):
+# 				updated_weights.append(model_weights[0])
+# 				model_weights.pop(0)
+# 			network.set_weights(updated_weights)
 
 
-		layer_output = network.predict(input_data)
-		np.save('output_'+str(i)+'.npy', layer_output)
-		print(i)
-		print(layer_type)
-		print(layer_config)
-		network.save('keras_layers/net_'+str(i)+'.h5')
+# 		layer_output = network.predict(input_data)
+# 		np.save('output_'+str(i)+'.npy', layer_output)
+# 		print(i)
+# 		print(layer_type)
+# 		print(layer_config)
+# 		network.save('keras_layers/net_'+str(i)+'.h5')
 
 
-	# zxc= deserialize_keras_object(config,
-	#                                 module_objects=globs,
-	#                                 custom_objects=custom_objects,
-	#                                 printable_module_name='layer')
+# 	# zxc= deserialize_keras_object(config,
+# 	#                                 module_objects=globs,
+# 	#                                 custom_objects=custom_objects,
+# 	#                                 printable_module_name='layer')
 
-	# globs['Conv2D']= layers.Conv2D
-	# layer1 = model_config['config']['layers'][1]
-	# zxc= deserialize_keras_object(layer1, module_objects=globs, custom_objects=custom_objects, printable_module_name='layer')
-
-
-	# asd = load_model(network_def, custom_objects=custom_objects)
+# 	# globs['Conv2D']= layers.Conv2D
+# 	# layer1 = model_config['config']['layers'][1]
+# 	# zxc= deserialize_keras_object(layer1, module_objects=globs, custom_objects=custom_objects, printable_module_name='layer')
 
 
-	print('qwerty')
-	print('qwerty')
+# 	# asd = load_model(network_def, custom_objects=custom_objects)
+
+
+# 	print('qwerty')
+# 	print('qwerty')
 
 
 
 
-# model_load_outputs =[]
-# for layer in model_load.layers:
-# 	model_load_outputs.append(layer.output)
+# # model_load_outputs =[]
+# # for layer in model_load.layers:
+# # 	model_load_outputs.append(layer.output)
 
-# new_model = Model(inputs = model_load.input, outputs = model_load_outputs)
+# # new_model = Model(inputs = model_load.input, outputs = model_load_outputs)
 	
 
 
