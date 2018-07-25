@@ -5,6 +5,7 @@ from keras.layers import Input, DepthwiseConv2D, Conv2D
 from keras.models import load_model
 from keras.utils.generic_utils import CustomObjectScope, deserialize_keras_object
 from keras.layers import deserialize as layer_from_config
+import pathlib
 
 
 import os.path
@@ -26,13 +27,13 @@ sess = tf.Session(config=config)
 set_session(sess)  # set this TensorFlow session as the default session for Keras
 
 
-def get_input(layer_name):
+def get_input(layer_name, network_folder_name):
 	file_regex = "^\d{0,4}_output_"+layer_name+"\.npy"
 	output_file=None
-	for filename in os.listdir('debug/keras_outputs'):
+	for filename in os.listdir(network_folder_name+'/keras_outputs'):
 		if re.match(file_regex, filename):
 			file=filename
-			output_file = "debug/keras_outputs/" + filename
+			output_file = network_folder_name+"/keras_outputs/" + filename
 
 	if output_file:
 		data = np.load(output_file)
@@ -57,8 +58,14 @@ def reorder(dims):
 	return (dims[1], dims[0], dims[2])
 
 
-def layer_split(fpga_network, keras_net):
-	network_def = keras_net
+def layer_split(fpga_network, network_def):
+	# network_def = keras_net
+	network_name = os.path.basename(network_def).split('.')[0]
+	network_folder_name = 'debug/' + os.path.basename(network_def).split('.')[0]+'/'
+	pathlib.Path(network_folder_name+'keras_outputs').mkdir(parents=True, exist_ok=True)
+	pathlib.Path(network_folder_name+'keras_networks').mkdir(parents=True, exist_ok=True)
+	pathlib.Path(network_folder_name+'PLACE_FPGA_DUMPS_HERE').mkdir(parents=True, exist_ok=True)
+
 	# network_def = 'C:\\Alex\\Work\\fpga_perf\\tool\\network\\mobilenet.h5'
 
 	f = h5py.File(network_def, mode='r')
@@ -82,11 +89,12 @@ def layer_split(fpga_network, keras_net):
 	# print('qwerty')
 	# print('qwerty')
 	# model_weights = model_load.get_weights()
-	
-	plot_model(model_load, to_file='debug/keras_model.png', show_shapes=True)
+	plot_file = network_folder_name+'/'+network_name+'_model.png'
+	plot_model(model_load, to_file=plot_file, show_shapes=True)
 
 
 	fpga_network_layers={}
+	keras_input_map={}
 
 	i=0
 	for layer in fpga_network.layer:
@@ -216,21 +224,25 @@ def layer_split(fpga_network, keras_net):
 						pass
 
 			input_data=[]
+			input_files=[]
 			input_nodes =  layer.layer_in
 			for node in input_nodes:
 				input_node_name = node.node_in.name
-				data, filename = get_input(input_node_name)
+				data, filename = get_input(input_node_name, network_folder_name)
 				input_data.append(data)
+				input_files.append(filename)
 
 			depth_predict = depth_model.predict(input_data)
-			depth_predict.dump('debug/keras_outputs/'+str(i).zfill(3)+'_output_'+name+'.npy')
-			depth_model.save('debug/keras_networks/layer_'+str(i).zfill(3)+'_'+name+'.h5')
+			depth_predict.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_output_'+name+'.npy')
+			depth_model.save(network_folder_name+'keras_networks/layer_'+str(i).zfill(3)+'_'+name+'.h5')
+			keras_input_map[str(i).zfill(3)+'_output_'+name]=input_files
+			
 
 			i+=1
 			point_predict = point_model.predict(depth_predict)
-			point_predict.dump('debug/keras_outputs/'+str(i).zfill(3)+'_output_'+point_name+'.npy')
-			point_model.save('debug/keras_networks/layer_'+str(i).zfill(3)+'_'+point_name+'.h5')
-
+			point_predict.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_output_'+point_name+'.npy')
+			point_model.save(network_folder_name+'keras_networks/layer_'+str(i).zfill(3)+'_'+point_name+'.h5')
+			keras_input_map[str(i).zfill(3)+'_output_'+point_name]=[str(i-1).zfill(3)+'_output_'+name+'.npy']
 			
 			i+=1
 
@@ -284,21 +296,30 @@ def layer_split(fpga_network, keras_net):
 
 
 			input_data=[]
+			input_files=[]
 			input_nodes =  layer.layer_in
 			for node in input_nodes:
 				input_node_name = node.node_in.name
-				input_data.append(get_input(input_node_name))
+				data, filename = get_input(input_node_name, network_folder_name)
+				input_data.append(data)
+				input_files.append(filename)
 
 
 			try:
 				prediction = keras_model.predict(input_data)
-				prediction.dump('debug/keras_outputs/'+str(i).zfill(3)+'_output_'+name+'.npy')
+				prediction.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_output_'+name+'.npy')
 			except:
 				print("error")
 			
 
-			keras_model.save('debug/keras_networks/layer_'+str(i).zfill(3)+'_'+name+'.h5')
+			keras_model.save(network_folder_name+'keras_networks/layer_'+str(i).zfill(3)+'_'+name+'.h5')
+			keras_input_map[str(i).zfill(3)+'_output_'+name]=input_files
 			i+=1
+	
+	map_json = json.dumps(keras_input_map)		
+	f = open(network_folder_name+'/'+network_name+'_input_map.json','w')
+	f.write(map_json)
+	f.close()
 
 	print('Done.')
 
