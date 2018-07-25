@@ -18,7 +18,7 @@ def remap(arr, dim):
     return np.concatenate(tuple(sub_arrs), axis = 2)
 
 fpga_folder = "C:/Alex/Work/debug_check/mobilenet/jaguar/fpga_dump"
-keras_folder = "C:/Alex/Work/debug_check/mobilenet/jaguar/keras_outputs"
+keras_folder = "C:/Alex/Work/debug_check/posenet/jaguar/keras_outputs"
 
 fpga_files = glob.glob(fpga_folder+'/*')
 keras_files = glob.glob(keras_folder+'/*')

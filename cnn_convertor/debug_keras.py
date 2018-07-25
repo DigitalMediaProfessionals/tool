@@ -15,7 +15,7 @@ import tensorflow as tf
 from scipy import misc
 import re
 import cv2 
-
+from keras.utils import plot_model
 from keras import backend as K
 from keras.backend.tensorflow_backend import set_session
 config = tf.ConfigProto()
@@ -31,6 +31,7 @@ def get_input(layer_name):
 	output_file=None
 	for filename in os.listdir('debug/keras_outputs'):
 		if re.match(file_regex, filename):
+			file=filename
 			output_file = "debug/keras_outputs/" + filename
 
 	if output_file:
@@ -41,19 +42,16 @@ def get_input(layer_name):
 		# data = misc.imread('im1.jpg')
 		
 		# pose
-		# data = cv2.imread('im1.jpg')
-		# data = np.asarray([data])
+		file = 'im1.jpg'
+		data = cv2.imread('im1.jpg')
+		data = np.asarray([data])
 
 
 		#mobilenet
-		data = cv2.imread('image_019.jpg')
-		data = np.asarray([data])
-		data = (data.astype(np.float32)-127.5)*0.0078431
-
-
-
-
-	return data
+		# data = cv2.imread('image_019.jpg')
+		# data = np.asarray([data])
+		# data = (data.astype(np.float32)-127.5)*0.0078431
+	return data, file
 
 def reorder(dims):
 	return (dims[1], dims[0], dims[2])
@@ -81,10 +79,13 @@ def layer_split(fpga_network, keras_net):
 	for layer in model_load.layers:
 		model_load_weights[layer.name]=layer.get_weights()
 	# model_load1 = keras.models.model_from_config(model_config, custom_objects=custom_objects)  #use the other one for  real weights	
-	print('qwerty')
-	print('qwerty')
+	# print('qwerty')
+	# print('qwerty')
 	# model_weights = model_load.get_weights()
 	
+	plot_model(model_load, to_file='debug/keras_model.png', show_shapes=True)
+
+
 	fpga_network_layers={}
 
 	i=0
@@ -218,18 +219,19 @@ def layer_split(fpga_network, keras_net):
 			input_nodes =  layer.layer_in
 			for node in input_nodes:
 				input_node_name = node.node_in.name
-				input_data.append(get_input(input_node_name))
+				data, filename = get_input(input_node_name)
+				input_data.append(data)
 
 			depth_predict = depth_model.predict(input_data)
-			depth_predict.dump('debug/keras_outputs/'+str(i)+'_output_'+name+'.npy')
-			depth_model.save('debug/keras_networks/layer_'+str(i)+'_'+name+'.h5')
-
-
-			point_predict = point_model.predict(depth_predict)
-			point_predict.dump('debug/keras_outputs/'+str(i+1)+'_output_'+point_name+'.npy')
-			point_model.save('debug/keras_networks/layer_'+str(i+1)+'_'+point_name+'.h5')
+			depth_predict.dump('debug/keras_outputs/'+str(i).zfill(3)+'_output_'+name+'.npy')
+			depth_model.save('debug/keras_networks/layer_'+str(i).zfill(3)+'_'+name+'.h5')
 
 			i+=1
+			point_predict = point_model.predict(depth_predict)
+			point_predict.dump('debug/keras_outputs/'+str(i).zfill(3)+'_output_'+point_name+'.npy')
+			point_model.save('debug/keras_networks/layer_'+str(i).zfill(3)+'_'+point_name+'.h5')
+
+			
 			i+=1
 
 		else:

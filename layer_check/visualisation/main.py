@@ -4,6 +4,7 @@ from bokeh.models import ColumnDataSource
 from bokeh.layouts import widgetbox
 from bokeh.models.widgets import Button, RadioButtonGroup, Select, Slider
 import glob
+import os
 import re
 # import bkserve
 # from random import random
@@ -49,8 +50,18 @@ def get_layer_data(layer):
         f_out = np.rollaxis(fpga_outputs[layer], 2)
         return 0, k_out, f_out
 
-def make_plot(layer, channel):
-    TOOLS = "pan,wheel_zoom,box_zoom,reset,save"
+def get_image(channel, view, keras_data, fpga_data):
+    if view==0:
+        image=keras_data[channel]
+    if view==1:
+        image = fpga_data[channel]
+    if view==2:
+        image = point_rel_difference(keras_data[channel] , fpga_data[channel])
+        
+    return image
+
+def make_plot(layer, view):
+    TOOLS = "pan,wheel_zoom,box_zoom,reset,save, hover"
     length, keras_data, fpga_data = get_layer_data(layer)
     
     plotgrid=[]
@@ -58,87 +69,121 @@ def make_plot(layer, channel):
 
     if length == 0:
         channels = keras_data.shape[0]
-        chan_min = channel*40
-        chan_max = min((channel*40 + 40),channels)
+        # chan_min = channel*40
+        # chan_max = min((channel*40 + 40),channels)
         width = 8
         height = int(channels/width)+1
-        color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
+        # color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
         
-        plots=[]
-        for channel in range(chan_min, chan_max):
-            print(channel)
-            print("onechannel")
-            img=point_rel_difference(keras_data[channel] , fpga_data[channel])
+        # plots=[]
+        row=[]
+        imgs=[]
+        for channel in range(channels):
+            img=get_image(channel, view, keras_data, fpga_data)
             
             img=img[::-1] #image shows upside down by default
-            
-            p = figure(title=str(channel),x_range=(0, keras_data.shape[1]), y_range=(0, keras_data.shape[2]),toolbar_location="left")
-            p.image(image=[img], x=0, y=0, dw=keras_data.shape[1], dh=keras_data.shape[2], color_mapper=color_mapper)
-            hover = HoverTool()
-            hover.tooltips = [("x", "$x"), ("value", "@image")]
-            p.tools.append(hover)
-            color_bar = ColorBar(color_mapper=color_mapper, ticker=BasicTicker(),
-                     label_standoff=3, border_line_color=None, location=(0,0), width=5)
-            p.add_layout(color_bar, 'right')
-            plots.append(p)
-        print("channelsdone")
-        for l in range(0,len(plots),width):
-            plotgrid.append(plots[l:l+width])
+            if view==2: 
+                img=np.pad(img, pad_width=1, mode='constant', constant_values=1)
+                view_label='Difference'
+            else:
+                img=np.pad(img, pad_width=1, mode='constant', constant_values=np.max(img))
+                if view==0:
+                    view_label='Keras'
+                if view==1:
+                    view_label='FPGA'
+
+            if channel%8==0:
+                if channel!=0:
+                    row=np.hstack(row)
+                    imgs.append(row)
+                    row=[]
+            row.append(img)
+
+        row=np.hstack(row)
+        imgs.append(row)
+        if imgs[0].shape!=imgs[-1].shape:
+            imgs[-1] = np.pad(imgs[-1], pad_width=[(0,0),(0,imgs[0].shape[1]-imgs[-1].shape[1])], mode='constant', constant_values=0)
+        imgs = np.vstack(imgs)
+
+        p = figure(title='Layer '+str(layer) +', '+view_label + 'View. Keras Filename: '+ os.path.basename(keras_files[layer]),x_range=(0, imgs.shape[1]), y_range=(0, imgs.shape[0]),toolbar_location="left", plot_width=width*200, plot_height=height*150)
+        if view==2:
+            color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
+        else:
+            color_mapper = LinearColorMapper(palette="Viridis256")
+        p.image(image=[imgs], x=0, y=0, dw=imgs.shape[1], dh=imgs.shape[0], color_mapper=color_mapper)
+
+        hover = HoverTool(tooltips = [("x", "$x{int}"), ("y", "$y{int}"), ("value", "@image")])
+        print(hover.renderers)
+        p.add_tools(hover)
+        color_bar = ColorBar(color_mapper=color_mapper, ticker=BasicTicker(),
+                 label_standoff=3, border_line_color=None, location='top_left', width=10, height=250)
+        p.add_layout(color_bar, 'right')
+
+            # p = figure(title=str(channel),x_range=(0, keras_data.shape[1]), y_range=(0, keras_data.shape[2]),toolbar_location="left")
+            # p.image(image=[img], x=0, y=0, dw=keras_data.shape[1], dh=keras_data.shape[2], color_mapper=color_mapper)
+            # hover = HoverTool()
+            # hover.tooltips = [("x", "$x"), ("value", "@image")]
+            # p.tools.append(hover)
+            # color_bar = ColorBar(color_mapper=color_mapper, ticker=BasicTicker(),
+            #          label_standoff=3, border_line_color=None, location=(0,0), width=5)
+            # p.add_layout(color_bar, 'right')
+            # plots.append(p)
+
+
+        # print("channelsdone")
+        # for l in range(0,len(plots),width):
+        #     plotgrid.append(plots[l:l+width])
         
-        print("plotgriddonw")
-        color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
-        p=gridplot(plotgrid, plot_width=220, plot_height=190, color_mapper=color_mapper, color_bar=color_bar, title=str(layer), toolbar_location="left", webgl=True)
-        print("p done")
+        # print("plotgriddonw")
+        # color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
+        # p=gridplot(plotgrid, plot_width=220, plot_height=190, color_mapper=color_mapper, color_bar=color_bar, title=str(layer), toolbar_location="left", webgl=True)
+        # print("p done")
     else:
         channels=0
         x_vals = np.arange(length)
         source=ColumnDataSource(data=dict(x=x_vals, keras=keras_data, fpga=fpga_data))
-        p = figure(tools=TOOLS,title="Layer "+str(layer), plot_width=1200, plot_height=800)
+        p = figure(tools=TOOLS,title="Layer "+str(layer) + 'Graph View. Keras Filename: '+ os.path.basename(keras_files[layer]), plot_width=1200, plot_height=800)
         k_line = p.line('x', 'keras', source=source, legend=dict(value="Keras"), line_color="red", line_width=1)
         f_line = p.line('x', 'fpga', source=source,legend=dict(value="FPGA"), line_color="blue", line_width=1)
-        hover = HoverTool()
-        hover.tooltips = [("x", "$x{(0)}"), ("keras", "@keras"), ("fpga", "@fpga")]
-        p.tools.append(hover)
-        plotgrid.append([p])
-        p=gridplot(plotgrid)
+        hover = HoverTool(tooltips = [("x", "$x{(0)}"), ("keras", "@keras"), ("fpga", "@fpga")])
+        print(hover.renderers)
+        p.add_tools(hover)
+        # plotgrid.append([p])
+        # p=gridplot(plotgrid)
 
     return p, channels
 
 def update_plot(attrname, old, new):
-    root = curdoc().roots[0]
-    layer=int(layerselect.value)
-    
-    print(old)
-    print(new)
-    print(layer)
-    print(channelselect.value)
-
-    channel=int(channelselect.value)
-    p, channels=make_plot(layer,channel)
-    print("got p and chans")
-    channel_select_range = make_channel_range(channels)
-    print("got range")
-    channelselect.options = channel_select_range
-    print("did options")
-    curdoc().add_root(column(row(layerselect, channelselect ), p))
-    print("added root")
+    root = curdoc().roots[1]
     curdoc().remove_root(root)
-    print("removed root")
+    layer=int(layerselect.value)
+    view=int(viewselect.value)
+    print(view)
+    print(layer)
+    viewselect.value=viewselect.value
+    p, channels=make_plot(layer,view)
+    # channel_select_range = make_channel_range(channels)
+    # channelselect.options = channel_select_range
+    curdoc().add_root(column(p))
+    
 
 
-def make_channel_range(channels):
-    channel_select_range=[]
-    for c in range(0,channels,40):
-        if (c+39)>channels:
-            channel_select_range.append(str(c)+'-'+str(channels))
-        else:
-            channel_select_range.append(str(c)+'-'+str(c+39))
-    return channel_select_range
+
+# def make_channel_range(channels):
+#     channel_select_range=[]
+#     for c in range(0,channels,40):
+#         if (c+39)>channels:
+#             channel_select_range.append(str(c)+'-'+str(channels))
+#         else:
+#             channel_select_range.append(str(c)+'-'+str(c+39))
+#     return channel_select_range
 
 
-output_file("test.html")
+# output_file("test.html")
 fpga_folder = "C:/Alex/Work/debug_check/mobilenet/jaguar/fpga_dump"
 keras_folder = "C:/Alex/Work/debug_check/mobilenet/jaguar/keras_outputs"
+# fpga_folder = "C:/Alex/Work/debug_check/posenet/fpga_dump"
+# keras_folder = "C:/Alex/Work/debug_check/posenet/keras_outputs"
 
 fpga_files = glob.glob(fpga_folder+'/*')
 keras_files = glob.glob(keras_folder+'/*')
@@ -159,20 +204,24 @@ for i in range(len(fpga_files)):
     fpga_dump = np.fromfile(fpga_files[i], dtype=np.float16)
     if len(fpga_dump)!=keras_outputs[i].size:
         fpga_dump = np.fromfile(fpga_files[i], dtype=np.float32)
+    # print(i)
     fpga_dump = remap(fpga_dump, keras_outputs[i].shape)
     fpga_outputs.append(fpga_dump)
 
 keras_length = np.arange(len(keras_outputs))
 layer_select_range=[]
+layer_name=[]
 for l in keras_length:
-    layer_select_range.append(str(l))
+    layer_name.append(str(l).zfill(2)+': '+os.path.basename(keras_files[l]))
+layer_select_range=list(zip(keras_length, layer_name))
 layerselect = Select(title="Layer:", value="0", options=layer_select_range)
 p, channels=make_plot(0, 0)
-channel_select_range = make_channel_range(channels)
-channelselect = Select(title="Channels:", value="0", options=channel_select_range)
+
+viewselect = Select(title="View:", value="0", options=[(0, 'Keras'),(1,'FPGA'),(2,'Difference')])
 
 layerselect.on_change('value', update_plot)
-channelselect.on_change('value', update_plot)
+viewselect.on_change('value', update_plot)
 
-curdoc().add_root(column(row(layerselect, channelselect ), p))
-# show(column(row(layerselect, channelselect ), p))
+curdoc().add_root(column(row(layerselect, viewselect)))
+curdoc().add_root(column(p))
+show(column(row(layerselect, viewselect), p))
