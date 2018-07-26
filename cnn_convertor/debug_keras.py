@@ -19,6 +19,7 @@ import cv2
 from keras.utils import plot_model
 from keras import backend as K
 from keras.backend.tensorflow_backend import set_session
+keras.backend.clear_session()
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
 config.log_device_placement = True  # to log device placement (on which device the operation ran)
@@ -43,15 +44,16 @@ def get_input(layer_name, network_folder_name):
 		# data = misc.imread('im1.jpg')
 		
 		# pose
-		file = 'im1.jpg'
-		data = cv2.imread('im1.jpg')
-		data = np.asarray([data])
-
-
-		#mobilenet
-		# data = cv2.imread('image_019.jpg')
+		# data = cv2.imread('im1.jpg')
 		# data = np.asarray([data])
-		# data = (data.astype(np.float32)-127.5)*0.0078431
+		#mobilenet
+		data = cv2.imread('image_019.jpg')
+		data = np.asarray([data])
+		data = (data.astype(np.float32)-127.5)*0.0078431
+
+		file = 'input.npy'
+		data.dump(network_folder_name+'input.npy')
+
 	return data, file
 
 def reorder(dims):
@@ -82,6 +84,7 @@ def layer_split(fpga_network, network_def):
 	globs['DepthwiseConv2D']=keras.applications.mobilenet.DepthwiseConv2D
 	
 	model_load = load_model(network_def, custom_objects=custom_objects)	
+	model_load.save(network_folder_name+network_name+'_soriginal_model.h5')
 	model_load_weights={}
 	for layer in model_load.layers:
 		model_load_weights[layer.name]=layer.get_weights()

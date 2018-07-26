@@ -37,7 +37,7 @@ parser.add_argument("--debug", type=str, help="output keras")
 args = parser.parse_args()
 debug=args.debug
 if debug:
-    print("debug mode")
+    print("Debug mode")
 # parse config file
 config = configparser.ConfigParser(strict=False,
                                    inline_comment_prefixes=('#', ';'))
@@ -112,7 +112,8 @@ network = cnn_parser.parse_network(network_def, network_data, network_type,
                                    custom_layer)
 fpga_net = fpga_layer.FPGANetwork(network, output_quantization)
 
-debug_keras.layer_split(fpga_net, network_def)
+if debug:
+    debug_keras.layer_split(fpga_net, network_def)
 
 fpga_net.output_network(output_folder, network_name, output_gensource,
                         output_gendoc, output_gengraph, graphviz_path)

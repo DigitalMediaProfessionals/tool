@@ -56,8 +56,9 @@ def get_image(channel, view, keras_data, fpga_data):
     if view==1:
         image = fpga_data[channel]
     if view==2:
+        image = keras_data[channel]-fpga_data[channel]
+    if view==3:
         image = point_rel_difference(keras_data[channel] , fpga_data[channel])
-        
     return image
 
 def make_plot(layer, view):
@@ -82,15 +83,17 @@ def make_plot(layer, view):
             img=get_image(channel, view, keras_data, fpga_data)
             
             img=img[::-1] #image shows upside down by default
-            if view==2: 
+            if view==3: 
                 img=np.pad(img, pad_width=1, mode='constant', constant_values=1)
-                view_label='Difference'
+                view_label='Normalised Difference'
             else:
                 img=np.pad(img, pad_width=1, mode='constant', constant_values=np.max(img))
                 if view==0:
                     view_label='Keras'
                 if view==1:
                     view_label='FPGA'
+                if view==2:
+                    view_label='Difference'
 
             if channel%8==0:
                 if channel!=0:
@@ -106,13 +109,14 @@ def make_plot(layer, view):
         imgs = np.vstack(imgs)
 
         p = figure(title='Layer '+str(layer) +', '+view_label + 'View. Keras Filename: '+ os.path.basename(keras_files[layer]),x_range=(0, imgs.shape[1]), y_range=(0, imgs.shape[0]),toolbar_location="left", plot_width=width*200, plot_height=height*150)
-        if view==2:
+        if view==3:
             color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
         else:
             color_mapper = LinearColorMapper(palette="Viridis256")
         p.image(image=[imgs], x=0, y=0, dw=imgs.shape[1], dh=imgs.shape[0], color_mapper=color_mapper)
 
         hover = HoverTool(tooltips = [("x", "$x{int}"), ("y", "$y{int}"), ("value", "@image")])
+        # hover = HoverTool()
         print(hover.renderers)
         p.add_tools(hover)
         color_bar = ColorBar(color_mapper=color_mapper, ticker=BasicTicker(),
@@ -217,7 +221,7 @@ layer_select_range=list(zip(keras_length, layer_name))
 layerselect = Select(title="Layer:", value="0", options=layer_select_range)
 p, channels=make_plot(0, 0)
 
-viewselect = Select(title="View:", value="0", options=[(0, 'Keras'),(1,'FPGA'),(2,'Difference')])
+viewselect = Select(title="View:", value="0", options=[(0, 'Keras'),(1,'FPGA'),(2,'Difference'), (3,'Normalised Difference')])
 
 layerselect.on_change('value', update_plot)
 viewselect.on_change('value', update_plot)
