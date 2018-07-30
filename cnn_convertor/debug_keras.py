@@ -29,7 +29,8 @@ set_session(sess)  # set this TensorFlow session as the default session for Kera
 
 
 def get_input(layer_name, network_folder_name):
-	file_regex = "^\d{0,4}_output_"+layer_name+"\.npy"
+	layer_filename = layer_name.replace('/','_') 
+	file_regex = "^\d{0,4}_output_"+layer_filename+"\.npy"
 	output_file=None
 	for filename in os.listdir(network_folder_name+'/keras_outputs'):
 		if re.match(file_regex, filename):
@@ -47,9 +48,14 @@ def get_input(layer_name, network_folder_name):
 		# data = cv2.imread('im1.jpg')
 		# data = np.asarray([data])
 		#mobilenet
+		# data = cv2.imread('image_019.jpg')
+		# data = np.asarray([data])
+		# data = (data.astype(np.float32)-127.5)*0.0078431
+		#squeezenet
 		data = cv2.imread('image_019.jpg')
+		data = cv2.resize(data, dsize=(227, 227), interpolation=cv2.INTER_CUBIC)
 		data = np.asarray([data])
-		data = (data.astype(np.float32)-127.5)*0.0078431
+		data = (data.astype(np.float32)-128)*1
 
 		file = 'input.npy'
 		data.dump(network_folder_name+'input.npy')
@@ -84,7 +90,7 @@ def layer_split(fpga_network, network_def):
 	globs['DepthwiseConv2D']=keras.applications.mobilenet.DepthwiseConv2D
 	
 	model_load = load_model(network_def, custom_objects=custom_objects)	
-	model_load.save(network_folder_name+network_name+'_soriginal_model.h5')
+	model_load.save(network_folder_name+network_name+'_original_model.h5')
 	model_load_weights={}
 	for layer in model_load.layers:
 		model_load_weights[layer.name]=layer.get_weights()
@@ -107,7 +113,8 @@ def layer_split(fpga_network, network_def):
 		last_layer = layer.node_out
 
 		
-		name = first_layer.name 
+		name = first_layer.name
+		
 		if name[-6:]=="_point":
 			print('pointlayer')
 			continue
@@ -236,6 +243,7 @@ def layer_split(fpga_network, network_def):
 				input_files.append(filename)
 
 			depth_predict = depth_model.predict(input_data)
+			name = name.replace('/','_') 
 			depth_predict.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_output_'+name+'.npy')
 			depth_model.save(network_folder_name+'keras_networks/layer_'+str(i).zfill(3)+'_'+name+'.h5')
 			keras_input_map[str(i).zfill(3)+'_output_'+name]=input_files
@@ -243,6 +251,7 @@ def layer_split(fpga_network, network_def):
 
 			i+=1
 			point_predict = point_model.predict(depth_predict)
+			point_name = point_name.replace('/','_') 
 			point_predict.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_output_'+point_name+'.npy')
 			point_model.save(network_folder_name+'keras_networks/layer_'+str(i).zfill(3)+'_'+point_name+'.h5')
 			keras_input_map[str(i).zfill(3)+'_output_'+point_name]=[str(i-1).zfill(3)+'_output_'+name+'.npy']
@@ -307,7 +316,7 @@ def layer_split(fpga_network, network_def):
 				input_data.append(data)
 				input_files.append(filename)
 
-
+			name = name.replace('/','_')
 			try:
 				prediction = keras_model.predict(input_data)
 				prediction.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_output_'+name+'.npy')
