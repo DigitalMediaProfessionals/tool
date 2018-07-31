@@ -131,15 +131,6 @@ def layer_split(fpga_network, network_def):
 			input_dim = reorder(first_layer.input_dim)
 			keras_input = Input(shape=input_dim)
 
-		
-		
-
-
-
-
-
-
-
 		if model_load.get_layer(name).__class__.__name__ == 'SeparableConv2D':
 			print('SEPCONV')
 			sepconv_layer = model_load.get_layer(name)
@@ -260,23 +251,101 @@ def layer_split(fpga_network, network_def):
 
 		else:
 			node_layers = []
-			node_layers.append(layer.node_in)
-			if layer.node_in == layer.node_out:
-				pass
-			else:
-				node_layers.append(layer.node_out)
+			out_nodes=[]
+			input_nodes=[]
+			for out_node in layer.node_out.output_nodes:
+				out_nodes.append(out_node)
+			
+			
+			# for run in layer.run:
+			# 	run_keys = list(run.__dict__.keys())
+			# 	for run_key in iter(run_keys):
+			# 		node=getattr(run, run_key)
+			# 		for in_node in node.input_nodes:
+			# 			if in_node.name not in run_keys:
+			# 				print(run_key)
+							
+			# 			else:
 
-			keras_out_layer = keras_input
-			for node_layer in node_layers:
+			# 		else:
+			# 			node_layers.append(node)
+			# 			node_finished=0
+			# 			while node_finished=0:
+			# 				if
+
+						
+					
+
+
+
+
+			for in_node in layer.node_in.input_nodes:
+				input_nodes.append(in_node)
+				next_nodes=in_node.output_nodes
+				if next_nodes[0] not in node_layers:
+						node_layers.append(next_nodes[0])
+				while len(next_nodes)>0:
+					# if next_nodes[0] in out_nodes:
+					# 	break
+					if next_nodes[0] not in node_layers:
+						node_layers.append(next_nodes[0])
+					for out in next_nodes[0].output_nodes:
+						if out not in out_nodes:
+							next_nodes.append(out)
+					next_nodes.remove(next_nodes[0])
+			# next(fpga_network.layer, None)
+			# continue
+
+
+			
+			# if layer.node_in == layer.node_out:
+			# 	node_layers.append(layer.node_in)
+			# elif layer.node_in.output_nodes[0] == layer.node_out:
+			# 	node_layers.append(layer.node_in)
+			# 	node_layers.append(layer.node_out)
+			# elif layer.node_in.output_nodes[0].type.name == 'Concat':
+
+			# else:
+			# 	for inner_output in layer.node_in.output_nodes:
+
+
+			# else:
+			# 	node_layers.append(layer.node_out)
+
+			# keras_out_layer = keras_input
+			keras_layers={}
+			model_inputs={}
+			model_inputs_list=[]
+			# for input_node in input_nodes:
+			# 	model_inputs[input_node.name] = Input(shape=input_node.output_dim)
+			
+			for node_layer in node_layers:	
 				node_layer_name = node_layer.name
-				try:
-					keras_layer = model_load.get_layer(node_layer_name)
-				except:
-					print('error')
+				print(node_layer_name)
+				# output_layer_name = node_layer_name
+				node_layer_inputs = []
+				for input_node in node_layer.input_nodes:
+					if input_node in input_nodes:
+						if input_node.name in model_inputs:
+							input_layer = model_inputs[input_node.name]	
+						else:
+							input_layer=Input(shape=input_node.output_dim)
+							model_inputs[input_node.name] = input_layer
+							model_inputs_list.append(input_layer)
+						node_layer_inputs.append(input_layer)
+
+					else:
+						node_layer_inputs.append(keras_layers[input_node.name])
+				if len(node_layer_inputs)==1:
+					node_layer_inputs=node_layer_inputs[0]
+			
+
+				keras_layer = model_load.get_layer(node_layer_name)
+
 				keras_layer_class = keras_layer.__class__
 				keras_layer_config = keras_layer.get_config()
 				with CustomObjectScope({'relu6': relu6}):
-					keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
+					keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(node_layer_inputs)
 					# keras_out_layer.set_weights(keras_layer.get_weights())
 			
 				if node_layer.bn_node:
@@ -285,7 +354,7 @@ def layer_split(fpga_network, network_def):
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
 					with CustomObjectScope({'relu6': relu6}):
-						keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
+						keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 
 				if node_layer.act_node:
@@ -294,10 +363,10 @@ def layer_split(fpga_network, network_def):
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
 					with CustomObjectScope({'relu6': relu6}):
-						keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
+						keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 
-			keras_model = Model(inputs = keras_input, outputs = keras_out_layer)
+			keras_model = Model(inputs = model_inputs_list, outputs = keras_layers[node_layer_name])
 			for keras_model_layer in keras_model.layers:
 				keras_model_layer_name = keras_model_layer.name
 				try:
