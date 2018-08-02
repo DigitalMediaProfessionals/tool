@@ -28,7 +28,7 @@ sess = tf.Session(config=config)
 set_session(sess)  # set this TensorFlow session as the default session for Keras
 
 
-def get_input(layer_name, network_folder_name):
+def get_input(layer_name, network_folder_name, input_params):
 	layer_filename = layer_name.replace('/','_') 
 	file_regex = "^\d{0,4}_output_"+layer_filename+"\.npy"
 	output_file=None
@@ -40,9 +40,18 @@ def get_input(layer_name, network_folder_name):
 	if output_file:
 		data = np.load(output_file)
 	else:
-		print('NO INPUT DATA FOUND')	
-		# data = misc.imread('image_019.jpg')
-		# data = misc.imread('im1.jpg')
+		print('USING INPUT IMAGE')	
+		
+		input_file 	= input_params['input_file']
+		r_offs 		= input_params['r_offs']
+		g_offs		= input_params['g_offs']
+		b_offs		= input_params['b_offs'] 
+		scale 		= input_params['scale'] 
+
+		data = cv2.imread(input_file)
+		data=data+[r_offs, g_offs, b_offs]
+		data=data*scale
+		data = np.asarray([data.astype(np.float32)])
 		
 		# pose
 		# data = cv2.imread('im1.jpg')
@@ -52,10 +61,13 @@ def get_input(layer_name, network_folder_name):
 		# data = np.asarray([data])
 		# data = (data.astype(np.float32)-127.5)*0.0078431
 		#squeezenet
-		data = cv2.imread('image_019.jpg')
-		data = cv2.resize(data, dsize=(227, 227), interpolation=cv2.INTER_CUBIC)
-		data = np.asarray([data])
-		data = (data.astype(np.float32)-128)*1
+		# data = cv2.imread('image_019.jpg')
+		# data = cv2.resize(data, dsize=(227, 227), interpolation=cv2.INTER_CUBIC)
+		# data = np.asarray([data])
+		# data = (data.astype(np.float32)-128)*1
+
+
+
 
 		file = 'input.npy'
 		data.dump(network_folder_name+'input.npy')
@@ -65,9 +77,19 @@ def get_input(layer_name, network_folder_name):
 def reorder(dims):
 	return (dims[1], dims[0], dims[2])
 
+def process_inputs(params):
+	inputs={}
+	inputs['input_file'] = params.input_file or 0
+	inputs['r_offs'] = params.r_offs or 0
+	inputs['g_offs'] = params.g_offs or 0
+	inputs['b_offs'] = params.b_offs or 0
+	inputs['scale'] = params.scale or 1
+	return inputs
 
-def layer_split(fpga_network, network_def):
+# def layer_split(fpga_network, network_def, input_file,r_offs=0, g_offs=0, b_offs=0,scale=1, transpose=1,  network_folder_name=None):
+def layer_split(fpga_network, network_def, **kwargs):
 	# network_def = keras_net
+	input_params = process_inputs(kwargs['input_params'])
 	network_name = os.path.basename(network_def).split('.')[0]
 	network_folder_name = 'debug/' + os.path.basename(network_def).split('.')[0]+'/'
 	pathlib.Path(network_folder_name+'keras_outputs').mkdir(parents=True, exist_ok=True)
@@ -229,7 +251,7 @@ def layer_split(fpga_network, network_def):
 			input_nodes =  layer.layer_in
 			for node in input_nodes:
 				input_node_name = node.node_in.name
-				data, filename = get_input(input_node_name, network_folder_name)
+				data, filename = get_input(input_node_name, network_folder_name, input_params)
 				input_data.append(data)
 				input_files.append(filename)
 
@@ -256,38 +278,21 @@ def layer_split(fpga_network, network_def):
 			for out_node in layer.node_out.output_nodes:
 				out_nodes.append(out_node)
 			
-			
-			# for run in layer.run:
-			# 	run_keys = list(run.__dict__.keys())
-			# 	for run_key in iter(run_keys):
-			# 		node=getattr(run, run_key)
-			# 		for in_node in node.input_nodes:
-			# 			if in_node.name not in run_keys:
-			# 				print(run_key)
-							
-			# 			else:
-
-			# 		else:
-			# 			node_layers.append(node)
-			# 			node_finished=0
-			# 			while node_finished=0:
-			# 				if
-
-						
-					
-
-
-
 
 			for in_node in layer.node_in.input_nodes:
 				input_nodes.append(in_node)
+				if layer.node_in==layer.node_out:
+					node_layers.append(layer.node_in)
+					continue
 				next_nodes=in_node.output_nodes
 				if next_nodes[0] not in node_layers:
 						node_layers.append(next_nodes[0])
 				while len(next_nodes)>0:
 					# if next_nodes[0] in out_nodes:
 					# 	break
-					if next_nodes[0] not in node_layers:
+					if next_nodes[0] in node_layers:
+						break
+					else:
 						node_layers.append(next_nodes[0])
 					for out in next_nodes[0].output_nodes:
 						if out not in out_nodes:
@@ -329,7 +334,9 @@ def layer_split(fpga_network, network_def):
 						if input_node.name in model_inputs:
 							input_layer = model_inputs[input_node.name]	
 						else:
-							input_layer=Input(shape=input_node.output_dim)
+							# dim=input_node.output_dim
+							dim = reorder(input_node.output_dim)
+							input_layer=Input(shape=dim)
 							model_inputs[input_node.name] = input_layer
 							model_inputs_list.append(input_layer)
 						node_layer_inputs.append(input_layer)
@@ -381,8 +388,11 @@ def layer_split(fpga_network, network_def):
 			input_nodes =  layer.layer_in
 			for node in input_nodes:
 				input_node_name = node.node_in.name
-				data, filename = get_input(input_node_name, network_folder_name)
-				input_data.append(data)
+				in_data, filename = get_input(input_node_name, network_folder_name, input_params)
+				if in_data.ndim==2:
+					if in_data.shape[0]==1:
+						in_data=np.asarray([[in_data]])
+				input_data.append(in_data)
 				input_files.append(filename)
 
 			name = name.replace('/','_')
@@ -394,7 +404,7 @@ def layer_split(fpga_network, network_def):
 			
 
 			keras_model.save(network_folder_name+'keras_networks/layer_'+str(i).zfill(3)+'_'+name+'.h5')
-			keras_input_map[str(i).zfill(3)+'_output_'+name]=input_files
+			keras_input_map[str(i).zfill(3)+name]=input_files
 			i+=1
 	
 	map_json = json.dumps(keras_input_map)		

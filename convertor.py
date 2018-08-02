@@ -33,9 +33,19 @@ from cnn_convertor import cnn_parser, fpga_layer, debug_keras
 # Handle parameters
 parser = argparse.ArgumentParser(description="DNN to FPGA convertor")
 parser.add_argument("INPUT_INI", type=str, help="Input ini file")
-parser.add_argument("--debug", type=str, help="output keras")
+parser.add_argument("--debug", type=str, help="Split Keras network for debugging")
+parser.add_argument("--input_file", type=str, help="Input image for network debugging")
+parser.add_argument("--r_offs", type=str, help="R offset for debug")
+parser.add_argument("--g_offs", type=str, help="G offset for debug")
+parser.add_argument("--b_offs", type=str, help="B offset for debug")
+parser.add_argument("--scale", type=str, help="scale for debug")
+	
 args = parser.parse_args()
 debug=args.debug
+# if debug:
+    # if args.input_file is None:
+    #     sys.exit("Input image required")
+
 if debug:
     print("Debug mode")
 # parse config file
@@ -113,7 +123,7 @@ network = cnn_parser.parse_network(network_def, network_data, network_type,
 fpga_net = fpga_layer.FPGANetwork(network, output_quantization)
 
 if debug:
-    debug_keras.layer_split(fpga_net, network_def)
+    debug_keras.layer_split(fpga_net, network_def, input_params=args)
 
 fpga_net.output_network(output_folder, network_name, output_gensource,
                         output_gendoc, output_gengraph, graphviz_path)

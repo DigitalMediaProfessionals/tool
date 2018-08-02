@@ -216,24 +216,50 @@ def update_plot(attrname, old, new):
 
 
 # output_file("test.html")
+
+parser = argparse.ArgumentParser()
+parser.add_argument("INPUT_FOLDER", type=str, help="Input ini file")
+
+	
+args = parser.parse_args()
+network_debug_folder = os.path.abspath(args.INPUT_FOLDER)+'\\'
+
+
 fpga_folder = "C:/Alex/Work/debug_check/mobilenet/jaguar/fpga_dump"
 keras_folder = "C:/Alex/Work/debug_check/mobilenet/jaguar/keras_outputs"
+
+keras_folder = network_debug_folder + 'keras_outputs\\'
+fpga_folder = network_debug_folder + 'PLACE_FPGA_DUMPS_HERE\\'
+debug_output_folder=network_debug_folder+'fpga_dump_debug_outputs\\'
+visual_output_folder=network_debug_folder+'visualisation_outputs\\'
+
+pathlib.Path(visual_output_folder).mkdir(parents=True, exist_ok=True)
+
+
+
 # fpga_folder = "C:/Alex/Work/debug_check/posenet/fpga_dump"
 # keras_folder = "C:/Alex/Work/debug_check/posenet/keras_outputs"
 
 fpga_files = glob.glob(fpga_folder+'/*')
 keras_files = glob.glob(keras_folder+'/*')
+
+debug_files = glob.glob(debug_output_folder+'/*')
 fpga_regex = "layer_input.bin$"
 r=re.compile(fpga_regex)
 fpga_files = list(filter(lambda x: not r.search(x), fpga_files))
 
 if len(fpga_files) != len(keras_files):
     print("Number of input files does not match")
+if len(fpga_files) != len(debug_files):
+    print("Number of input files does not match")
 
 keras_outputs = []    
-for i in range(len(keras_files)):
-    keras_outputs.append(np.load(keras_files[i])[0])
+for file in keras_files:
+    keras_outputs.append(np.load(file)[0])
 
+debug_files = []    
+for file in debug_files:
+    debug_files.append(np.load(file)[0])
 
 fpga_outputs=[]
 for i in range(len(fpga_files)):
