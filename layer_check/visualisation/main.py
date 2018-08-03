@@ -6,6 +6,9 @@ from bokeh.models.widgets import Button, RadioButtonGroup, Select, Slider
 import glob
 import os
 import re
+import pathlib
+import argparse
+import sys
 # import bkserve
 # from random import random
 from bokeh.layouts import column, row
@@ -13,7 +16,7 @@ from bokeh.models import Button
 from bokeh.palettes import RdYlBu3
 from bokeh.plotting import figure, curdoc
 from bokeh.models import HoverTool, GlyphRenderer, CustomJSHover
-from bokeh.models import LinearColorMapper, ColorBar, BasicTicker
+from bokeh.models import LinearColorMapper, ColorBar, BasicTicker, Label
 
 def remap(arr, dim):
     if len(dim) == 1:
@@ -35,52 +38,60 @@ def point_rel_difference(p,f):
     reldiff[reldiff!=reldiff] = 0
     return reldiff
 
-def get_layer_data(layer):
-    if len(keras_outputs[layer].shape)==1:
-        x=keras_outputs[layer].size
-        return x, keras_outputs[layer], fpga_outputs[layer]
+def get_layer_data(layer, data1, data2):
+    datasets=[keras_outputs, fpga_outputs, debug_outputs]
+    dataset1 = datasets[data1]
+    
+    if len(dataset1[layer].shape)==1:
+        x=dataset1[layer].size
+        return x, datasets[0][layer], datasets[1][layer],datasets[2][layer], 0, 0
 
-    elif keras_outputs[layer].shape[1]==1 and keras_outputs[layer].shape[0]==1:
-        x=keras_outputs[layer].size
-        return x, keras_outputs[layer][0][0], fpga_outputs[layer][0][0]
+    elif dataset1[layer].shape[1]==1 and dataset1[layer].shape[0]==1:
+        x=dataset1[layer].size
+        return x, datasets[0][layer][0][0], datasets[1][layer][0][0],datasets[2][layer][0][0], 0, 0
 
     else:
-        channels = keras_outputs[layer].shape[2]
-        k_out = np.rollaxis(keras_outputs[layer], 2)
-        f_out = np.rollaxis(fpga_outputs[layer], 2)
-        return 0, k_out, f_out
+        dataset2 = datasets[data2]
+        min_val=[]
+        min_val.append([np.min (sublist) for sublist in datasets[0][layer]])
+        min_val.append([np.min (sublist) for sublist in datasets[1][layer]])
+        min_val.append([np.min (sublist) for sublist in datasets[2][layer]])
+        min_val=np.min(min_val)
+        max_val=[]
+        max_val.append([np.max (sublist) for sublist in datasets[0][layer]])
+        max_val.append([np.max (sublist) for sublist in datasets[1][layer]])
+        max_val.append([np.max (sublist) for sublist in datasets[2][layer]])
+        max_val=np.min(max_val)
+        channels = dataset1[layer].shape[2]
+        d1_out = np.rollaxis(dataset1[layer], 2)
+        d2_out = np.rollaxis(dataset2[layer], 2)
+        return 0, d1_out, d2_out,None, min_val, max_val
 
-def get_image(channel, view, keras_data, fpga_data):
+def get_image(channel, view, dataset1, dataset2):
     if view==0:
-        image=keras_data[channel]
+        image=dataset1[channel]
     if view==1:
-        image = fpga_data[channel]
+        image = dataset2[channel]
     if view==2:
-        image = keras_data[channel]-fpga_data[channel]
+        image = dataset1[channel]-dataset2[channel]
     if view==3:
-        image = point_rel_difference(keras_data[channel] , fpga_data[channel])
+        image = point_rel_difference(dataset1[channel] , dataset2[channel])
     return image
 
-def make_plot(layer, view):
+def make_plot(layer, view, data1, data2):
     TOOLS = "pan,wheel_zoom,box_zoom,reset,save"
-    length, keras_data, fpga_data = get_layer_data(layer)
-    
+    length, dataset1, dataset2,dataset3, min_val, max_val = get_layer_data(layer, data1, data2)
     plotgrid=[]
 
-
     if length == 0:
-        channels = keras_data.shape[0]
-        # chan_min = channel*40
-        # chan_max = min((channel*40 + 40),channels)
+        channels = dataset1.shape[0]
         width = 8
         height = int(channels/width)+1
-        # color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
-        
-        # plots=[]
+
         row=[]
         imgs=[]
         for channel in range(channels):
-            img=get_image(channel, view, keras_data, fpga_data)
+            img=get_image(channel, view, dataset1, dataset2)
             
             img=img[::-1] #image shows upside down by default
             if view==3: 
@@ -89,11 +100,13 @@ def make_plot(layer, view):
             else:
                 img=np.pad(img, pad_width=1, mode='constant', constant_values=np.max(img))
                 if view==0:
-                    view_label='Keras'
+                    view_label=data1select.value
                 if view==1:
-                    view_label='FPGA'
+                    view_label=data2select.value
                 if view==2:
-                    view_label='Difference'
+                    view_label='{0}, {1} Difference'.format(data1select.value, data2select.value)
+                if view==3:
+                    view_label='{0}, {1} Normalised Difference'.format(data1select.value, data2select.value)
 
             if channel%8==0:
                 if channel!=0:
@@ -108,85 +121,38 @@ def make_plot(layer, view):
             imgs[-1] = np.pad(imgs[-1], pad_width=[(0,0),(0,imgs[0].shape[1]-imgs[-1].shape[1])], mode='constant', constant_values=0)
         imgs = np.vstack(imgs)
 
-        p = figure(title='Layer '+str(layer) +', '+view_label + 'View. Keras Filename: '+ os.path.basename(keras_files[layer]),x_range=(0, imgs.shape[1]), y_range=(0, imgs.shape[0]),toolbar_location="left", plot_width=width*200, plot_height=height*150)
+        p = figure(title=view_label + ' View. Layer: '+ os.path.basename(keras_files[layer]),x_range=(0, imgs.shape[1]), y_range=(0, imgs.shape[0]),toolbar_location="left", plot_width=width*200, plot_height=height*150)
+        p.title.text_font_size = "20px"
         if view==3:
             color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
         else:
-            color_mapper = LinearColorMapper(palette="Viridis256", low=np.min(imgs), high=np.max(imgs))
+            color_mapper = LinearColorMapper(palette="Viridis256", low=min_val, high=max_val)
         p.image(image=[imgs], x=0, y=0, dw=imgs.shape[1], dh=imgs.shape[0], color_mapper=color_mapper)
 
-        lat_custom = CustomJSHover(code="""
-            var projections = require("core/util/projections");
-            var x = special_vars.x
-            var y = 5
-            var coords = projections.wgs84_mercator.inverse([x, y])
-            return "" + coords[1]
-            """)
-
-        # hover = HoverTool(tooltips = [("x", "$x{int}"), ("y", "$y{int}"), ("value", "@image")])
-        hover = HoverTool(tooltips=[( 'lat','@y{custom}' ), ( 'xx','$x' )], formatters=dict(y=lat_custom))
-        print(hover.renderers)
-        # p.add_tools(hover)
-
-        code="""
-            var x = special_vars.x
-            return '' + x
-        """
-
-        p.add_tools(HoverTool(
-            tooltips=[
-                ( 'x',   "$x"            ),
-                ("y",   "$y")
-            ],
-
-            formatters={
-
-                'y' : CustomJSHover(code=''' return value + " CUSTOM STUFF" '''),   # use 'printf' formatter for 'adj close' field
-                                        # use default 'numeral' formatter for other fields
-            },
-
-            # # display a tooltip whenever the cursor is vertically in line with a glyph
-            # mode='vline'
-        ))
-
-
-
-
+        hover = HoverTool(tooltips = [("x", "$x{int}"), ("y", "$y{int}"), ("value", "@image")])
+        p.add_tools(hover)
         color_bar = ColorBar(color_mapper=color_mapper, ticker=BasicTicker(),
                  label_standoff=5, border_line_color=None, location=(0,0), width=10, height=250)
         p.add_layout(color_bar, 'right')
 
-            # p = figure(title=str(channel),x_range=(0, keras_data.shape[1]), y_range=(0, keras_data.shape[2]),toolbar_location="left")
-            # p.image(image=[img], x=0, y=0, dw=keras_data.shape[1], dh=keras_data.shape[2], color_mapper=color_mapper)
-            # hover = HoverTool()
-            # hover.tooltips = [("x", "$x"), ("value", "@image")]
-            # p.tools.append(hover)
-            # color_bar = ColorBar(color_mapper=color_mapper, ticker=BasicTicker(),
-            #          label_standoff=3, border_line_color=None, location=(0,0), width=5)
-            # p.add_layout(color_bar, 'right')
-            # plots.append(p)
-
-
-        # print("channelsdone")
-        # for l in range(0,len(plots),width):
-        #     plotgrid.append(plots[l:l+width])
-        
-        # print("plotgriddonw")
-        # color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
-        # p=gridplot(plotgrid, plot_width=220, plot_height=190, color_mapper=color_mapper, color_bar=color_bar, title=str(layer), toolbar_location="left", webgl=True)
-        # print("p done")
     else:
         channels=0
         x_vals = np.arange(length)
-        source=ColumnDataSource(data=dict(x=x_vals, keras=keras_data, fpga=fpga_data))
-        p = figure(tools=TOOLS,title="Layer "+str(layer) + 'Graph View. Keras Filename: '+ os.path.basename(keras_files[layer]), plot_width=1200, plot_height=800)
+        p = figure(tools=TOOLS,title="Layer "+str(layer) + 'Graph View. Layer: '+ os.path.basename(keras_files[layer]), plot_width=1200, plot_height=800)
+        if debug_present:
+            source=ColumnDataSource(data=dict(x=x_vals, keras=dataset1, fpga=dataset2, debug=dataset3))
+            d_line = p.line('x', 'debug', source=source,legend=dict(value="Debug"), line_color="green", line_width=1)
+            hover = HoverTool(tooltips = [("x", "$x{(0)}"), ("keras", "@keras"), ("fpga", "@fpga"), ("debug", "@debug")])
+        else:
+            source=ColumnDataSource(data=dict(x=x_vals, keras=dataset1, fpga=dataset2, debug=dataset3))
+            hover = HoverTool(tooltips = [("x", "$x{(0)}"), ("keras", "@keras"), ("fpga", "@fpga")])
         k_line = p.line('x', 'keras', source=source, legend=dict(value="Keras"), line_color="red", line_width=1)
         f_line = p.line('x', 'fpga', source=source,legend=dict(value="FPGA"), line_color="blue", line_width=1)
-        hover = HoverTool(tooltips = [("x", "$x{(0)}"), ("keras", "@keras"), ("fpga", "@fpga")])
+        
+        p.legend.click_policy="hide"
+        
         print(hover.renderers)
         p.add_tools(hover)
-        # plotgrid.append([p])
-        # p=gridplot(plotgrid)
 
     return p, channels
 
@@ -195,38 +161,26 @@ def update_plot(attrname, old, new):
     curdoc().remove_root(root)
     layer=layer_dict[layerselect.value]
     view=view_dict[viewselect.value]
+    data1=data_dict[data1select.value]
+    data2=data_dict[data2select.value]
+    p, channels=make_plot(layer,view, data1, data2)
 
-    # viewselect.value=viewselect.value
-    p, channels=make_plot(layer,view)
-    # channel_select_range = make_channel_range(channels)
-    # channelselect.options = channel_select_range
     curdoc().add_root(column(p))
-    
-
-
-
-# def make_channel_range(channels):
-#     channel_select_range=[]
-#     for c in range(0,channels,40):
-#         if (c+39)>channels:
-#             channel_select_range.append(str(c)+'-'+str(channels))
-#         else:
-#             channel_select_range.append(str(c)+'-'+str(c+39))
-#     return channel_select_range
-
-
-# output_file("test.html")
 
 parser = argparse.ArgumentParser()
-parser.add_argument("INPUT_FOLDER", type=str, help="Input ini file")
+parser.add_argument("INPUT_FOLDER", type=str, help="Network folder")
+parser.add_argument("--save_layers", type=str, help="Saves all layers (can't be used with server)")
 
-	
+
 args = parser.parse_args()
 network_debug_folder = os.path.abspath(args.INPUT_FOLDER)+'\\'
 
+if not os.path.exists(network_debug_folder):
+    print("crud")
+    sys.exit(0)
 
-fpga_folder = "C:/Alex/Work/debug_check/mobilenet/jaguar/fpga_dump"
-keras_folder = "C:/Alex/Work/debug_check/mobilenet/jaguar/keras_outputs"
+# network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\mobilenet\\"
+
 
 keras_folder = network_debug_folder + 'keras_outputs\\'
 fpga_folder = network_debug_folder + 'PLACE_FPGA_DUMPS_HERE\\'
@@ -242,24 +196,25 @@ pathlib.Path(visual_output_folder).mkdir(parents=True, exist_ok=True)
 
 fpga_files = glob.glob(fpga_folder+'/*')
 keras_files = glob.glob(keras_folder+'/*')
-
 debug_files = glob.glob(debug_output_folder+'/*')
+
 fpga_regex = "layer_input.bin$"
 r=re.compile(fpga_regex)
 fpga_files = list(filter(lambda x: not r.search(x), fpga_files))
 
 if len(fpga_files) != len(keras_files):
     print("Number of input files does not match")
-if len(fpga_files) != len(debug_files):
-    print("Number of input files does not match")
+    sys.exit()
+
+if len(debug_files) ==0:
+    print("No debug data")
+    sys.exit()
+
+
 
 keras_outputs = []    
 for file in keras_files:
     keras_outputs.append(np.load(file)[0])
-
-debug_files = []    
-for file in debug_files:
-    debug_files.append(np.load(file)[0])
 
 fpga_outputs=[]
 for i in range(len(fpga_files)):
@@ -270,6 +225,10 @@ for i in range(len(fpga_files)):
     fpga_dump = remap(fpga_dump, keras_outputs[i].shape)
     fpga_outputs.append(fpga_dump)
 
+debug_outputs = []    
+for file in debug_files:
+    debug_outputs.append(np.load(file)[0])
+
 keras_length = np.arange(len(keras_outputs))
 
 layer_name=[]
@@ -279,23 +238,59 @@ for l in keras_length:
     layer_name.append(l_name)
     layer_dict[l_name]=l
 layer=layer_name[0]
-layerselect = Select(title="Layer:", value=layer, options=layer_name)
-p, channels=make_plot(0, 0)
 
 view_name=[]
 view_dict={
-    'Keras'         : 0,
-    'FPGA'          : 1,
+    'Data1'         : 0,
+    'Data2'          : 1,
     'Difference'    : 2,
     'Normalised Difference':3,
 }
 
+data_dict={}
+data_dict['Keras']=0
+data_dict['FPGA']=1
+if len(debug_outputs)!=0:
+    debug_present=1
+    data_dict['Debug']=2
+else:
+    debug_present=0
+    debug_outputs=keras_outputs
 
-viewselect = Select(title="View:", value='Keras', options=list(view_dict.keys()))
+layerselect = Select(title="Layer:", value=layer, options=layer_name)
+viewselect = Select(title="View:", value='Data1', options=list(view_dict.keys()))
+data1select=Select(title="Dataset 1:", value='Keras', options=list(data_dict.keys()))
+data2select=Select(title="Dataset 2:", value='FPGA', options=list(data_dict.keys()))
 
 layerselect.on_change('value', update_plot)
 viewselect.on_change('value', update_plot)
+data1select.on_change('value', update_plot)
+data2select.on_change('value', update_plot)
 
-curdoc().add_root(column(row(layerselect, viewselect)))
+
+if args.save_layers==1:
+    for l in range(len(keras_outputs)):
+        html_name="layer"+str(l).zfill(3)+"_norm_difference"
+        output_file(visual_output_folder+html_name+".html", title=html_name)
+        p, channels=make_plot(l, 0, 0, 1)
+        save(column(p))
+        html_name="layer"+str(l).zfill(3)+"_norm_difference"
+        output_file(visual_output_folder+html_name+".html", title=html_name)
+        p, channels=make_plot(l, 1, 0, 1)
+        save(column(p))
+        html_name="layer"+str(l).zfill(3)+"_norm_difference"
+        output_file(visual_output_folder+html_name+".html", title=html_name)
+        p, channels=make_plot(l, 2, 0, 1)
+        save(column(p))
+        html_name="layer"+str(l).zfill(3)+"_norm_difference"
+        output_file(visual_output_folder+html_name+".html", title=html_name)
+        p, channels=make_plot(l, 3, 0, 1)
+        save(column(p))
+    
+
+
+p, channels=make_plot(0, 0, 0, 1)
+
+curdoc().add_root(column(row(layerselect, viewselect, data1select, data2select)))
 curdoc().add_root(column(p))
-show(column(row(layerselect, viewselect), p))
+show(column(row( data1select, data2select, layerselect, viewselect), p))
