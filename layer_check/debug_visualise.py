@@ -42,9 +42,6 @@ for i in range(len(fpga_files)):
     fpga_dump = remap(fpga_dump, keras_outputs[i].shape)
     fpga_outputs.append(fpga_dump)
 
-
-
-print('2545435vtrgfdghfx')
 bkserve.bokehserver(keras_outputs, fpga_outputs)
 
 

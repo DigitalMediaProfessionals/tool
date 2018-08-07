@@ -30,7 +30,7 @@ set_session(sess)  # set this TensorFlow session as the default session for Kera
 
 def get_input(layer_name, network_folder_name, input_params):
 	layer_filename = layer_name.replace('/','_') 
-	file_regex = "^\d{0,4}_output_"+layer_filename+"\.npy"
+	file_regex = "^\d{0,4}_"+layer_filename+"\.npy"
 	output_file=None
 	for filename in os.listdir(network_folder_name+'/keras_outputs'):
 		if re.match(file_regex, filename):
@@ -43,10 +43,10 @@ def get_input(layer_name, network_folder_name, input_params):
 		print('USING INPUT IMAGE')	
 		
 		input_file 	= input_params['input_file']
-		r_offs 		= input_params['r_offs']
-		g_offs		= input_params['g_offs']
-		b_offs		= input_params['b_offs'] 
-		scale 		= input_params['scale'] 
+		r_offs 		= float(input_params['r_offs'])
+		g_offs		= float(input_params['g_offs'])
+		b_offs		= float(input_params['b_offs'])
+		scale 		= float(input_params['scale'])
 
 		data = cv2.imread(input_file)
 		data=data+[r_offs, g_offs, b_offs]
@@ -257,17 +257,17 @@ def layer_split(fpga_network, network_def, **kwargs):
 
 			depth_predict = depth_model.predict(input_data)
 			name = name.replace('/','_') 
-			depth_predict.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_output_'+name+'.npy')
-			depth_model.save(network_folder_name+'keras_networks/layer_'+str(i).zfill(3)+'_'+name+'.h5')
-			keras_input_map[str(i).zfill(3)+'_output_'+name]=input_files
+			depth_predict.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_'+name+'.npy')
+			depth_model.save(network_folder_name+'keras_networks/'+str(i).zfill(3)+'_'+name+'.h5')
+			keras_input_map[str(i).zfill(3)+'_'+name]=input_files
 			
 
 			i+=1
 			point_predict = point_model.predict(depth_predict)
 			point_name = point_name.replace('/','_') 
-			point_predict.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_output_'+point_name+'.npy')
-			point_model.save(network_folder_name+'keras_networks/layer_'+str(i).zfill(3)+'_'+point_name+'.h5')
-			keras_input_map[str(i).zfill(3)+'_output_'+point_name]=[str(i-1).zfill(3)+'_output_'+name+'.npy']
+			point_predict.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_'+point_name+'.npy')
+			point_model.save(network_folder_name+'keras_networks/'+str(i).zfill(3)+'_'+point_name+'.h5')
+			keras_input_map[str(i).zfill(3)+'_'+point_name]=[str(i-1).zfill(3)+'_'+name+'.npy']
 			
 			i+=1
 
@@ -398,13 +398,13 @@ def layer_split(fpga_network, network_def, **kwargs):
 			name = name.replace('/','_')
 			try:
 				prediction = keras_model.predict(input_data)
-				prediction.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_output_'+name+'.npy')
+				prediction.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_'+name+'.npy')
 			except:
 				print("error")
 			
 
-			keras_model.save(network_folder_name+'keras_networks/layer_'+str(i).zfill(3)+'_'+name+'.h5')
-			keras_input_map[str(i).zfill(3)+name]=input_files
+			keras_model.save(network_folder_name+'keras_networks/'+str(i).zfill(3)+'_'+name+'.h5')
+			keras_input_map[str(i).zfill(3)+'_'+name]=input_files
 			i+=1
 	
 	map_json = json.dumps(keras_input_map)		

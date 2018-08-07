@@ -83,6 +83,17 @@ fpga_regex = "layer_input.bin$"
 r=re.compile(fpga_regex)
 fpga_input_file = list(filter(lambda x: r.search(x), fpga_files))
 fpga_files = list(filter(lambda x: not r.search(x), fpga_files))
+if len(fpga_files)>100:
+    fpga_layers=[]
+    for i in range(10):
+        filenum=('0'+str(i))
+        fpga_layers.append(fpga_outputs_folder+'layer'+filenum+'.bin')
+    for i in range(10,len(fpga_files)):
+        filenum=str(i)
+        fpga_layers.append(fpga_outputs_folder+'layer'+filenum+'.bin')
+    fpga_files=fpga_layers
+
+    
 
 if len(fpga_files) != len(keras_files):
     print("Number of input files does not match")
@@ -91,6 +102,7 @@ if len(fpga_files) != len(keras_files):
 layers={}
 keras_outputs={}
 fpga_outputs={}
+
 
 for i, file in enumerate(layer_files):
     name=os.path.basename(file).split('.')[0]
@@ -103,7 +115,7 @@ for i, file in enumerate(layer_files):
     try:
         fpga_dump = remap(fpga_dump, keras_outputs[name].shape)
     except:
-        print('error')
+        print('Remap error layer:' + str(i))
     while(len(fpga_dump.shape)<4):
         fpga_dump = np.asarray([fpga_dump])
     fpga_outputs[name] = fpga_dump
@@ -118,7 +130,9 @@ for i, layer in enumerate(layers.items()):
     if i==0:
         layer_input = keras_input
     else:
-        layer_input = fpga_outputs[prev_layer_name]
+        layer_input=[]
+        for map_in in network_map[layer_name]:
+            layer_input.append(fpga_outputs[map_in[:-4]])
 
     with CustomObjectScope({'relu6': relu6}):
         keras_model = load_model(layer_file)
@@ -127,7 +141,7 @@ for i, layer in enumerate(layers.items()):
         layer_predict.dump(debug_output_folder+layer_name+'.npy')
 
     except:
-        print("Error")
+        print("Prediction Error Layer: "+ str(i))
     
     prev_layer_name = layer_name
 

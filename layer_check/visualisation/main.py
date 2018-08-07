@@ -15,7 +15,7 @@ from bokeh.layouts import column, row
 from bokeh.models import Button
 from bokeh.palettes import RdYlBu3
 from bokeh.plotting import figure, curdoc
-from bokeh.models import HoverTool, GlyphRenderer, CustomJSHover
+from bokeh.models import HoverTool, GlyphRenderer
 from bokeh.models import LinearColorMapper, ColorBar, BasicTicker, Label
 
 def remap(arr, dim):
@@ -123,7 +123,9 @@ def make_plot(layer, view, data1, data2):
 
         p = figure(title=view_label + ' View. Layer: '+ os.path.basename(keras_files[layer]),x_range=(0, imgs.shape[1]), y_range=(0, imgs.shape[0]),toolbar_location="left", plot_width=width*200, plot_height=height*150)
         p.title.text_font_size = "20px"
-        if view==3:
+        if view==2:
+            color_mapper = LinearColorMapper(palette="Viridis256", low=np.min(imgs), high=np.max(imgs))
+        elif view==3:
             color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
         else:
             color_mapper = LinearColorMapper(palette="Viridis256", low=min_val, high=max_val)
@@ -176,7 +178,7 @@ args = parser.parse_args()
 network_debug_folder = os.path.abspath(args.INPUT_FOLDER)+'\\'
 
 if not os.path.exists(network_debug_folder):
-    print("crud")
+    print("Folder does not exist")
     sys.exit(0)
 
 # network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\mobilenet\\"
@@ -198,9 +200,19 @@ fpga_files = glob.glob(fpga_folder+'/*')
 keras_files = glob.glob(keras_folder+'/*')
 debug_files = glob.glob(debug_output_folder+'/*')
 
+
 fpga_regex = "layer_input.bin$"
 r=re.compile(fpga_regex)
 fpga_files = list(filter(lambda x: not r.search(x), fpga_files))
+if len(fpga_files)>100:
+    fpga_layers=[]
+    for i in range(10):
+        filenum=('0'+str(i))
+        fpga_layers.append(fpga_folder+'layer'+filenum+'.bin')
+    for i in range(10,len(fpga_files)):
+        filenum=str(i)
+        fpga_layers.append(fpga_folder+'layer'+filenum+'.bin')
+    fpga_files=fpga_layers
 
 if len(fpga_files) != len(keras_files):
     print("Number of input files does not match")
