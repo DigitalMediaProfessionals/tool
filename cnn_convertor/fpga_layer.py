@@ -127,7 +127,10 @@ def merge_bn_scale(node, kernel_size, n_c, n_m):
     e = 0.00001
     weight.shape = (n_m, n_c * kernel_size[1] * kernel_size[0])
     for i in range(n_m):
-        norm = sc_weight[i] / math.sqrt(bn_var[i] + e)
+        try:
+            norm = sc_weight[i] / math.sqrt(bn_var[i] + e)
+        except:
+            print("weighterror")
         weight[i, :] = weight[i, :] * norm
         bias[i] = (bias[i] - bn_mean[i]) * norm + sc_bias[i]
     weight.shape = (-1,)

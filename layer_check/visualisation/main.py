@@ -40,8 +40,21 @@ def point_rel_difference(p,f):
 
 def get_layer_data(layer, data1, data2):
     datasets=[keras_outputs, fpga_outputs, debug_outputs]
+
+    min_val=[]
+    min_val.append([np.min (sublist) for sublist in datasets[0][layer]])
+    min_val.append([np.min (sublist) for sublist in datasets[1][layer]])
+    min_val.append([np.min (sublist) for sublist in datasets[2][layer]])
+    min_val=np.min(min_val)
+    max_val=[]
+    max_val.append([np.max (sublist) for sublist in datasets[0][layer]])
+    max_val.append([np.max (sublist) for sublist in datasets[1][layer]])
+    max_val.append([np.max (sublist) for sublist in datasets[2][layer]])
+    max_val=np.max(max_val)
+
+
     dataset1 = datasets[data1]
-    
+
     if len(dataset1[layer].shape)==1:
         x=dataset1[layer].size
         return x, datasets[0][layer], datasets[1][layer],datasets[2][layer], 0, 0
@@ -51,17 +64,7 @@ def get_layer_data(layer, data1, data2):
         return x, datasets[0][layer][0][0], datasets[1][layer][0][0],datasets[2][layer][0][0], 0, 0
 
     else:
-        dataset2 = datasets[data2]
-        min_val=[]
-        min_val.append([np.min (sublist) for sublist in datasets[0][layer]])
-        min_val.append([np.min (sublist) for sublist in datasets[1][layer]])
-        min_val.append([np.min (sublist) for sublist in datasets[2][layer]])
-        min_val=np.min(min_val)
-        max_val=[]
-        max_val.append([np.max (sublist) for sublist in datasets[0][layer]])
-        max_val.append([np.max (sublist) for sublist in datasets[1][layer]])
-        max_val.append([np.max (sublist) for sublist in datasets[2][layer]])
-        max_val=np.min(max_val)
+        dataset2 = np.asarray(datasets[data2])
         channels = dataset1[layer].shape[2]
         d1_out = np.rollaxis(dataset1[layer], 2)
         d2_out = np.rollaxis(dataset2[layer], 2)
@@ -181,7 +184,7 @@ if not os.path.exists(network_debug_folder):
     print("Folder does not exist")
     sys.exit(0)
 
-# network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\mobilenet\\"
+network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\mobilenet_integer_model\\"
 
 
 keras_folder = network_debug_folder + 'keras_outputs\\'
@@ -243,6 +246,20 @@ for file in debug_files:
 
 keras_length = np.arange(len(keras_outputs))
 
+
+for l in keras_length:
+    max_val=[]
+    max_val.append(np.nanmax (keras_outputs[l]) )
+    max_val.append(np.nanmax (fpga_outputs[l]) )
+    max_val.append(np.nanmax (debug_outputs[l]) )
+    max_val=np.max(max_val)
+    print(max_val)
+    keras_outputs[l][keras_outputs[l]!=keras_outputs[l]] = max_val
+    fpga_outputs[l][fpga_outputs[l]!=fpga_outputs[l]] = max_val
+    debug_outputs[l][debug_outputs[l]!=debug_outputs[l]] = max_val
+
+
+
 layer_name=[]
 layer_dict={}
 for l in keras_length:
@@ -301,7 +318,7 @@ if args.save_layers==1:
     
 
 
-p, channels=make_plot(0, 0, 0, 1)
+p, channels=make_plot(29, 0, 0, 1)
 
 curdoc().add_root(column(row(layerselect, viewselect, data1select, data2select)))
 curdoc().add_root(column(p))

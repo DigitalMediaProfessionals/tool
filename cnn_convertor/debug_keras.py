@@ -41,14 +41,24 @@ def get_input(layer_name, network_folder_name, input_params):
 		data = np.load(output_file)
 	else:
 		print('USING INPUT IMAGE')	
-		
-		input_file 	= input_params['input_file']
-		r_offs 		= float(input_params['r_offs'])
-		g_offs		= float(input_params['g_offs'])
-		b_offs		= float(input_params['b_offs'])
-		scale 		= float(input_params['scale'])
+		r_offs 		= input_params['r_offs']
+		g_offs		= input_params['g_offs']
+		b_offs		= input_params['b_offs']
+		scale 		= input_params['scale']
 
-		data = cv2.imread(input_file)
+
+		if input_params['integer_test'] ==1:
+			model_input_shape = input_params['model_input_shape']
+			data=np.random.randint(0,2,size=model_input_shape)
+			cv2.imwrite(network_folder_name+'integer_img.jpg', data)
+		elif inputs['random_input'] == 1:
+			model_input_shape = input_params['model_input_shape']
+			data=np.random.randint(0,255,size=model_input_shape)
+			cv2.imwrite(network_folder_name+'random_img.jpg', data)
+		else:
+			input_file 	= input_params['input_file']
+			data = cv2.imread(input_file)
+
 		data=data+[r_offs, g_offs, b_offs]
 		data=data*scale
 		data = np.asarray([data.astype(np.float32)])
@@ -66,9 +76,6 @@ def get_input(layer_name, network_folder_name, input_params):
 		# data = np.asarray([data])
 		# data = (data.astype(np.float32)-128)*1
 
-
-
-
 		file = 'input.npy'
 		data.dump(network_folder_name+'input.npy')
 
@@ -79,11 +86,13 @@ def reorder(dims):
 
 def process_inputs(params):
 	inputs={}
-	inputs['input_file'] = params.input_file or 0
-	inputs['r_offs'] = params.r_offs or 0
-	inputs['g_offs'] = params.g_offs or 0
-	inputs['b_offs'] = params.b_offs or 0
-	inputs['scale'] = params.scale or 1
+	inputs['input_file'] = params.input_file 
+	inputs['integer_test'] = params.integer_test
+	inputs['random_input'] = params.random_input
+	inputs['r_offs'] = params.r_offs
+	inputs['g_offs'] = params.g_offs
+	inputs['b_offs'] = params.b_offs
+	inputs['scale'] = params.scale
 	return inputs
 
 # def layer_split(fpga_network, network_def, input_file,r_offs=0, g_offs=0, b_offs=0,scale=1, transpose=1,  network_folder_name=None):
@@ -111,8 +120,10 @@ def layer_split(fpga_network, network_def, **kwargs):
 	globs['relu6']=keras.applications.mobilenet.relu6
 	globs['DepthwiseConv2D']=keras.applications.mobilenet.DepthwiseConv2D
 	
-	model_load = load_model(network_def, custom_objects=custom_objects)	
-	model_load.save(network_folder_name+network_name+'_original_model.h5')
+	model_load = load_model(network_def, custom_objects=custom_objects)
+	input_params['model_input_shape'] = model_load.input_shape[1:]
+	if input_params['integer_test'] !=1:
+		model_load.save(network_folder_name+network_name+'_original_model.h5')
 	model_load_weights={}
 	for layer in model_load.layers:
 		model_load_weights[layer.name]=layer.get_weights()
