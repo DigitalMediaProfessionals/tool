@@ -42,9 +42,9 @@ def get_layer_data(layer, data1, data2):
     datasets=[keras_outputs, fpga_outputs, debug_outputs]    
     dataset1 = np.asarray(datasets[data1])
 
-    if len(dataset1[layer].shape)==1:
+    if dataset1[layer].shape[0]==1:
         x=dataset1[layer].size
-        if dataset1[layer].shape[0]==1:
+        if len(dataset1[layer].shape)==3:
             k_out=None
             f_out=None
             d_out=None
@@ -156,7 +156,7 @@ def make_plot(layer, view, data1, data2):
         # imgs=imgs[:1000]
         ratio = imgs.shape[0]/imgs.shape[1]
         width=width*200
-        height = width*ratio
+        height = int(width*ratio)
 
         if height>16000:
             height=16000
@@ -233,18 +233,18 @@ def update_plot(attrname, old, new):
     curdoc().add_root(column(p))
 
 parser = argparse.ArgumentParser()
-# parser.add_argument("INPUT_FOLDER", type=str, help="Network folder")
+parser.add_argument("INPUT_FOLDER", type=str, help="Network folder")
 parser.add_argument("--save_layers", type=str, help="Saves all layers (can't be used with server)")
 
 
 args = parser.parse_args()
-# network_debug_folder = os.path.abspath(args.INPUT_FOLDER)+'\\'
+network_debug_folder = os.path.abspath(args.INPUT_FOLDER)+'\\'
 
-# if not os.path.exists(network_debug_folder):
-#     print("Folder does not exist")
-#     sys.exit(0)
+if not os.path.exists(network_debug_folder):
+    print("Folder does not exist")
+    sys.exit(0)
 
-network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\mobilenet\\"
+# network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\mobilenet\\"
 
 
 keras_folder = network_debug_folder + 'keras_outputs\\'
@@ -300,6 +300,9 @@ for i in range(len(fpga_files)):
         fpga_dump = np.fromfile(fpga_files[i], dtype=np.float32)
     # print(i)
     fpga_dump = remap(fpga_dump, keras_outputs[i].shape)
+    fmax = np.max(fpga_dump)
+    fpga_dump[np.isinf(fpga_dump)] = fmax
+    fpga_dump[np.isnan(fpga_dump)] = fmax
     fpga_outputs.append(fpga_dump)
 # fpga_outputs = fpga_outputs[:num_files]
 
@@ -307,8 +310,6 @@ debug_outputs = []
 for file in debug_files:
     debug_outputs.append(np.load(file)[0])
 # debug_outputs=debug_outputs[:num_files]
-
-keras_length = np.arange(len(keras_outputs))
 
 
 
@@ -319,7 +320,7 @@ debug_output_length = len(debug_outputs)
 
 layer_name=[]
 layer_dict={}
-for l in keras_length:
+for l in range(keras_output_length):
     l_name=str(l).zfill(2)+': '+os.path.basename(keras_files[l])
     layer_name.append(l_name)
     layer_dict[l_name]=l
@@ -332,7 +333,7 @@ view_dict={
     'Difference'    : 2,
     'Normalised Difference':3,
 }
-layer=25
+layer=28
 data_dict=make_data_dict(layer)
 
 layerselect = Select(title="Layer:", value=layer_name[layer], options=layer_name)
