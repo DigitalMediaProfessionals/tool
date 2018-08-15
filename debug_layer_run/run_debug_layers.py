@@ -97,6 +97,7 @@ if len(fpga_files)>100:
 
 if len(fpga_files) != len(keras_files):
     print("Number of input files does not match")
+num_files = min(len(layer_files), len(keras_files), len(fpga_files))
 
 
 layers={}
@@ -104,7 +105,9 @@ keras_outputs={}
 fpga_outputs={}
 
 
-for i, file in enumerate(layer_files):
+# for i, file in enumerate(layer_files):
+for i in range(num_files):
+    file = layer_files[i]
     name=os.path.basename(file).split('.')[0]
     layers[name]=file
     keras_outputs[name] = np.load(keras_files[i])[0]
@@ -130,9 +133,13 @@ for i, layer in enumerate(layers.items()):
     if i==0:
         layer_input = keras_input
     else:
-        layer_input=[]
-        for map_in in network_map[layer_name]:
-            layer_input.append(fpga_outputs[map_in[:-4]])
+        if network_map:
+            layer_input=[]
+            for map_in in network_map[layer_name]:
+                layer_input.append(fpga_outputs[map_in[:-4]])
+        else:
+            layer_input=[fpga_outputs[i-1]]
+            
 
     with CustomObjectScope({'relu6': relu6}):
         keras_model = load_model(layer_file)

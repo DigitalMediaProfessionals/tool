@@ -51,7 +51,7 @@ def get_input(layer_name, network_folder_name, input_params):
 			model_input_shape = input_params['model_input_shape']
 			data=np.random.randint(0,2,size=model_input_shape)
 			cv2.imwrite(network_folder_name+'integer_img.jpg', data)
-		elif inputs['random_input'] == 1:
+		elif input_params['random_input'] == 1:
 			model_input_shape = input_params['model_input_shape']
 			data=np.random.randint(0,255,size=model_input_shape)
 			cv2.imwrite(network_folder_name+'random_img.jpg', data)
@@ -161,7 +161,11 @@ def layer_split(fpga_network, network_def, **kwargs):
 			for input_dim in input_dims:
 				keras_input.append(Input(shape=input_dim))
 		else:
-			input_dim = reorder(first_layer.input_dim)
+			if len(first_layer.input_dim)==3:
+				input_dim = reorder(first_layer.input_dim)
+			elif len(first_layer.input_dim)==1:
+				input_dim = first_layer.input_dim
+
 			keras_input = Input(shape=input_dim)
 
 		if model_load.get_layer(name).__class__.__name__ == 'SeparableConv2D':
@@ -218,7 +222,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 					try:
 						keras_layer = model_load.get_layer(node_layer_name)
 					except:
-						print('error')
+						print('model load error')
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
 					with CustomObjectScope({'relu6': relu6}):
@@ -299,11 +303,9 @@ def layer_split(fpga_network, network_def, **kwargs):
 				if next_nodes[0] not in node_layers:
 						node_layers.append(next_nodes[0])
 				while len(next_nodes)>0:
-					# if next_nodes[0] in out_nodes:
-					# 	break
-					if next_nodes[0] in node_layers:
+					if next_nodes[0] in out_nodes:
 						break
-					else:
+					if next_nodes[0] not in node_layers:
 						node_layers.append(next_nodes[0])
 					for out in next_nodes[0].output_nodes:
 						if out not in out_nodes:
@@ -346,7 +348,10 @@ def layer_split(fpga_network, network_def, **kwargs):
 							input_layer = model_inputs[input_node.name]	
 						else:
 							# dim=input_node.output_dim
-							dim = reorder(input_node.output_dim)
+							if len(input_node.output_dim)==3:
+								dim = reorder(input_node.output_dim)
+							elif len(input_node.output_dim)==1:
+								dim = input_node.output_dim
 							input_layer=Input(shape=dim)
 							model_inputs[input_node.name] = input_layer
 							model_inputs_list.append(input_layer)
@@ -403,6 +408,12 @@ def layer_split(fpga_network, network_def, **kwargs):
 				if in_data.ndim==2:
 					if in_data.shape[0]==1:
 						in_data=np.asarray([[in_data]])
+				if in_data.ndim==4:
+					if in_data.shape[0]==1:
+						if in_data.shape[1]==1:
+							if in_data.shape[2]==1:
+								if keras_model.input_shape[1]==in_data.shape[3]:
+									in_data = in_data[0][0]
 				input_data.append(in_data)
 				input_files.append(filename)
 
@@ -411,7 +422,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 				prediction = keras_model.predict(input_data)
 				prediction.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_'+name+'.npy')
 			except:
-				print("error")
+				print("prediction error")
 			
 
 			keras_model.save(network_folder_name+'keras_networks/'+str(i).zfill(3)+'_'+name+'.h5')

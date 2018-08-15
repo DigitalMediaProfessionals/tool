@@ -39,31 +39,50 @@ def point_rel_difference(p,f):
     return reldiff
 
 def get_layer_data(layer, data1, data2):
-    datasets=[keras_outputs, fpga_outputs, debug_outputs]
-
-    min_val=[]
-    min_val.append([np.min (sublist) for sublist in datasets[0][layer]])
-    min_val.append([np.min (sublist) for sublist in datasets[1][layer]])
-    min_val.append([np.min (sublist) for sublist in datasets[2][layer]])
-    min_val=np.min(min_val)
-    max_val=[]
-    max_val.append([np.max (sublist) for sublist in datasets[0][layer]])
-    max_val.append([np.max (sublist) for sublist in datasets[1][layer]])
-    max_val.append([np.max (sublist) for sublist in datasets[2][layer]])
-    max_val=np.max(max_val)
-
-
-    dataset1 = datasets[data1]
+    datasets=[keras_outputs, fpga_outputs, debug_outputs]    
+    dataset1 = np.asarray(datasets[data1])
 
     if len(dataset1[layer].shape)==1:
         x=dataset1[layer].size
-        return x, datasets[0][layer], datasets[1][layer],datasets[2][layer], 0, 0
-
-    elif dataset1[layer].shape[1]==1 and dataset1[layer].shape[0]==1:
-        x=dataset1[layer].size
-        return x, datasets[0][layer][0][0], datasets[1][layer][0][0],datasets[2][layer][0][0], 0, 0
+        if dataset1[layer].shape[0]==1:
+            k_out=None
+            f_out=None
+            d_out=None
+            if keras_output_length>layer:
+                k_out = datasets[0][layer][0][0]
+            if fpga_output_length>layer:
+                f_out = datasets[1][layer][0][0]
+            if debug_output_length>layer:
+                d_out = datasets[2][layer][0][0]
+            return x, k_out, f_out, d_out, 0, 0
+        else:
+            k_out=None
+            f_out=None
+            d_out=None
+            if keras_output_length>layer:
+                k_out = datasets[0][layer]
+            if fpga_output_length>layer:
+                f_out = datasets[1][layer]
+            if debug_output_length>layer:
+                d_out = datasets[2][layer]
+            return x, k_out, f_out, d_out, 0, 0
 
     else:
+        min_val=[]
+        max_val=[]
+        if keras_output_length>layer:
+            min_val.append([np.min (sublist) for sublist in keras_outputs[layer]])
+            max_val.append([np.max (sublist) for sublist in keras_outputs[layer]])
+        if fpga_output_length>layer:
+            min_val.append([np.min (sublist) for sublist in fpga_outputs[layer]])
+            max_val.append([np.max (sublist) for sublist in fpga_outputs[layer]])
+        if debug_output_length>layer:
+            min_val.append([np.min (sublist) for sublist in debug_outputs[layer]])
+            max_val.append([np.max (sublist) for sublist in debug_outputs[layer]])
+
+        min_val=np.min(min_val)
+        max_val=np.max(max_val)
+
         dataset2 = np.asarray(datasets[data2])
         channels = dataset1[layer].shape[2]
         d1_out = np.rollaxis(dataset1[layer], 2)
@@ -81,9 +100,20 @@ def get_image(channel, view, dataset1, dataset2):
         image = point_rel_difference(dataset1[channel] , dataset2[channel])
     return image
 
+def make_data_dict(layer):
+    data_dict={}
+    if keras_output_length>layer:
+        data_dict['Keras']=0
+    if fpga_output_length>layer:
+        data_dict['FPGA']=1
+    if debug_output_length>layer:
+        data_dict['Debug']=2
+    return data_dict
+
+
 def make_plot(layer, view, data1, data2):
     TOOLS = "pan,wheel_zoom,box_zoom,reset,save"
-    length, dataset1, dataset2,dataset3, min_val, max_val = get_layer_data(layer, data1, data2)
+    length, dataset1, dataset2, dataset3, min_val, max_val = get_layer_data(layer, data1, data2)
     plotgrid=[]
 
     if length == 0:
@@ -123,15 +153,23 @@ def make_plot(layer, view, data1, data2):
         if imgs[0].shape!=imgs[-1].shape:
             imgs[-1] = np.pad(imgs[-1], pad_width=[(0,0),(0,imgs[0].shape[1]-imgs[-1].shape[1])], mode='constant', constant_values=0)
         imgs = np.vstack(imgs)
+        # imgs=imgs[:1000]
+        ratio = imgs.shape[0]/imgs.shape[1]
+        width=width*200
+        height = width*ratio
 
-        p = figure(title=view_label + ' View. Layer: '+ os.path.basename(keras_files[layer]),x_range=(0, imgs.shape[1]), y_range=(0, imgs.shape[0]),toolbar_location="left", plot_width=width*200, plot_height=height*150)
+        if height>16000:
+            height=16000
+            width=int(height/ratio)
+        p = figure(title=view_label + ' View. Layer: '+ os.path.basename(keras_files[layer]),x_range=(0, imgs.shape[1]), y_range=(0, imgs.shape[0]),toolbar_location="left", plot_width=width, plot_height=height)
         p.title.text_font_size = "20px"
         if view==2:
             color_mapper = LinearColorMapper(palette="Viridis256", low=np.min(imgs), high=np.max(imgs))
         elif view==3:
             color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
         else:
-            color_mapper = LinearColorMapper(palette="Viridis256", low=min_val, high=max_val)
+            # color_mapper = LinearColorMapper(palette="Viridis256", low=min_val, high=max_val)
+            color_mapper = LinearColorMapper(palette="Viridis256", low=np.min(imgs), high=np.max(imgs))
         p.image(image=[imgs], x=0, y=0, dw=imgs.shape[1], dh=imgs.shape[0], color_mapper=color_mapper)
 
         hover = HoverTool(tooltips = [("x", "$x{int}"), ("y", "$y{int}"), ("value", "@image")])
@@ -144,16 +182,29 @@ def make_plot(layer, view, data1, data2):
         channels=0
         x_vals = np.arange(length)
         p = figure(tools=TOOLS,title="Layer "+str(layer) + 'Graph View. Layer: '+ os.path.basename(keras_files[layer]), plot_width=1200, plot_height=800)
-        if debug_present:
-            source=ColumnDataSource(data=dict(x=x_vals, keras=dataset1, fpga=dataset2, debug=dataset3))
+        source_dict={}
+        source_dict['x']=x_vals
+        hover_tooltips = [("x", "$x{(0)}")]
+        if keras_output_length>layer:
+            source_dict['keras'] = dataset1
+            hover_tooltips.append(("keras", "@keras"))
+        if fpga_output_length>layer:
+            source_dict['fpga'] = dataset2
+            hover_tooltips.append(("fpga", "@fpga"))
+        if debug_output_length>layer:
+            source_dict['debug'] = dataset2
+            hover_tooltips.append(("debug", "@debug"))
+        source=ColumnDataSource(data=source_dict)
+        hover = HoverTool(tooltips = hover_tooltips)
+        # source=ColumnDataSource(data=dict(x=x_vals, keras=dataset1, fpga=dataset2, debug=dataset3))
+        # hover = HoverTool(tooltips = [("x", "$x{(0)}"), ("keras", "@keras"), ("fpga", "@fpga")])
+        # k_line = p.line('x', 'keras', source=source, legend=dict(value="Keras"), line_color="red", line_width=1)
+        if keras_output_length>layer:
+            k_line = p.line('x', 'keras', source=source, legend=dict(value="Keras"), line_color="red", line_width=1)
+        if fpga_output_length>layer:
+            f_line = p.line('x', 'fpga', source=source,legend=dict(value="FPGA"), line_color="blue", line_width=1)
+        if debug_output_length>layer:
             d_line = p.line('x', 'debug', source=source,legend=dict(value="Debug"), line_color="green", line_width=1)
-            hover = HoverTool(tooltips = [("x", "$x{(0)}"), ("keras", "@keras"), ("fpga", "@fpga"), ("debug", "@debug")])
-        else:
-            source=ColumnDataSource(data=dict(x=x_vals, keras=dataset1, fpga=dataset2, debug=dataset3))
-            hover = HoverTool(tooltips = [("x", "$x{(0)}"), ("keras", "@keras"), ("fpga", "@fpga")])
-        k_line = p.line('x', 'keras', source=source, legend=dict(value="Keras"), line_color="red", line_width=1)
-        f_line = p.line('x', 'fpga', source=source,legend=dict(value="FPGA"), line_color="blue", line_width=1)
-        
         p.legend.click_policy="hide"
         
         print(hover.renderers)
@@ -165,26 +216,35 @@ def update_plot(attrname, old, new):
     root = curdoc().roots[1]
     curdoc().remove_root(root)
     layer=layer_dict[layerselect.value]
+    data_dict=make_data_dict(layer)
     view=view_dict[viewselect.value]
+
+    if data1select.value not in data_dict:
+        data1select.value=list(data_dict.keys())[0]
+    if data2select.value not in data_dict:
+        data2selectvalue=list(data_dict.keys())[0]
+    data1select.options=list(data_dict.keys())
+    data2select.options=list(data_dict.keys())
     data1=data_dict[data1select.value]
     data2=data_dict[data2select.value]
+
     p, channels=make_plot(layer,view, data1, data2)
 
     curdoc().add_root(column(p))
 
 parser = argparse.ArgumentParser()
-parser.add_argument("INPUT_FOLDER", type=str, help="Network folder")
+# parser.add_argument("INPUT_FOLDER", type=str, help="Network folder")
 parser.add_argument("--save_layers", type=str, help="Saves all layers (can't be used with server)")
 
 
 args = parser.parse_args()
-network_debug_folder = os.path.abspath(args.INPUT_FOLDER)+'\\'
+# network_debug_folder = os.path.abspath(args.INPUT_FOLDER)+'\\'
 
-if not os.path.exists(network_debug_folder):
-    print("Folder does not exist")
-    sys.exit(0)
+# if not os.path.exists(network_debug_folder):
+#     print("Folder does not exist")
+#     sys.exit(0)
 
-network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\mobilenet_integer_model\\"
+network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\mobilenet\\"
 
 
 keras_folder = network_debug_folder + 'keras_outputs\\'
@@ -219,17 +279,19 @@ if len(fpga_files)>100:
 
 if len(fpga_files) != len(keras_files):
     print("Number of input files does not match")
-    sys.exit()
+# num_files = min(len(fpga_files), len(keras_files), len(debug_files))
+    # sys.exit()
 
 if len(debug_files) ==0:
     print("No debug data")
-    sys.exit()
+    # sys.exit()
 
 
 
 keras_outputs = []    
 for file in keras_files:
     keras_outputs.append(np.load(file)[0])
+# keras_outputs = keras_outputs[:num_files]
 
 fpga_outputs=[]
 for i in range(len(fpga_files)):
@@ -239,25 +301,20 @@ for i in range(len(fpga_files)):
     # print(i)
     fpga_dump = remap(fpga_dump, keras_outputs[i].shape)
     fpga_outputs.append(fpga_dump)
+# fpga_outputs = fpga_outputs[:num_files]
 
 debug_outputs = []    
 for file in debug_files:
     debug_outputs.append(np.load(file)[0])
+# debug_outputs=debug_outputs[:num_files]
 
 keras_length = np.arange(len(keras_outputs))
 
 
-for l in keras_length:
-    max_val=[]
-    max_val.append(np.nanmax (keras_outputs[l]) )
-    max_val.append(np.nanmax (fpga_outputs[l]) )
-    max_val.append(np.nanmax (debug_outputs[l]) )
-    max_val=np.max(max_val)
-    print(max_val)
-    keras_outputs[l][keras_outputs[l]!=keras_outputs[l]] = max_val
-    fpga_outputs[l][fpga_outputs[l]!=fpga_outputs[l]] = max_val
-    debug_outputs[l][debug_outputs[l]!=debug_outputs[l]] = max_val
 
+keras_output_length = len(keras_outputs)
+fpga_output_length = len(fpga_outputs)
+debug_output_length = len(debug_outputs)
 
 
 layer_name=[]
@@ -266,7 +323,7 @@ for l in keras_length:
     l_name=str(l).zfill(2)+': '+os.path.basename(keras_files[l])
     layer_name.append(l_name)
     layer_dict[l_name]=l
-layer=layer_name[0]
+
 
 view_name=[]
 view_dict={
@@ -275,21 +332,16 @@ view_dict={
     'Difference'    : 2,
     'Normalised Difference':3,
 }
+layer=25
+data_dict=make_data_dict(layer)
 
-data_dict={}
-data_dict['Keras']=0
-data_dict['FPGA']=1
-if len(debug_outputs)!=0:
-    debug_present=1
-    data_dict['Debug']=2
-else:
-    debug_present=0
-    debug_outputs=keras_outputs
-
-layerselect = Select(title="Layer:", value=layer, options=layer_name)
+layerselect = Select(title="Layer:", value=layer_name[layer], options=layer_name)
 viewselect = Select(title="View:", value='Data1', options=list(view_dict.keys()))
-data1select=Select(title="Dataset 1:", value='Keras', options=list(data_dict.keys()))
-data2select=Select(title="Dataset 2:", value='FPGA', options=list(data_dict.keys()))
+data1select=Select(title="Dataset 1:", value=list(data_dict.keys())[0], options=list(data_dict.keys()))
+if len(data_dict.keys())>1:
+    data2select=Select(title="Dataset 2:", value=list(data_dict.keys())[1], options=list(data_dict.keys()))
+else:
+    data2select=Select(title="Dataset 2:", value=list(data_dict.keys())[0], options=list(data_dict.keys()))
 
 layerselect.on_change('value', update_plot)
 viewselect.on_change('value', update_plot)
@@ -318,7 +370,7 @@ if args.save_layers==1:
     
 
 
-p, channels=make_plot(29, 0, 0, 1)
+p, channels=make_plot(layer, 0, 0, 0)
 
 curdoc().add_root(column(row(layerselect, viewselect, data1select, data2select)))
 curdoc().add_root(column(p))
