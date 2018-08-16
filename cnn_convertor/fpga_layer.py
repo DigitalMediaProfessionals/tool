@@ -511,6 +511,7 @@ def gen_source_conv(of, name, n, layer, quantization):
     of.write('  get_layer({0}).name = "{1}";\n'.format(n, ", ".join(layer_names)))
     of.write('  dmp_dv_cmdraw_conv_v0& conf = get_layer({0}).conv_conf;\n'.format(n))
     of.write('  conf.header.size = sizeof(conf);\n')
+    of.write('  conf.header.device_type = DMP_DV_DEV_CONV;\n')
     of.write('  conf.header.version = 0;\n')
     of.write('  // Topo: {0:032b}\n'.format(layer.topo))
     of.write('  conf.topo = 0x{0:X};  // [31:0] Output Destination of each run, 0 = UBUF, 1 = EXTMEM\n\n'.format(layer.topo))
@@ -660,6 +661,7 @@ def gen_source_fc(of, name, n, layer):
     of.write('  dmp_dv_cmdraw_fc_v0& conf = get_layer({0}).fc_conf;\n'.format(n))
     of.write('  conf.header.size = sizeof(conf);\n')
     of.write('  conf.header.version = 0;\n')
+    of.write('  conf.header.device_type = DMP_DV_DEV_FC;\n')
     of.write('  conf.input_size = {0};\n'.format(w * h * c))
     of.write('  conf.output_size = {0};\n'.format(m))
     of.write('  conf.weight_buf.mem = weights_mem_;\n'
