@@ -9,3 +9,8 @@ It also needs the following modules: `numpy`, `protobuf`, `h5py`, and `opencv-py
 ```
 python -m pip install numpy protobuf h5py opencv-python
 ```
+
+or on Ubuntu 18.04:
+```
+sudo apt-get install python3-numpy python3-protobuf python3-h5py python3-opencv
+```
