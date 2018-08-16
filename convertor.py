@@ -47,6 +47,12 @@ parser.add_argument("--ub_size", type=int, default=655360,
 args = parser.parse_args()
 
 
+# Set limits
+fpga_layer.set_max_fc_vector_size(args.max_fc_vector_size)
+fpga_layer.set_max_kernel_size(args.max_kernel_size)
+fpga_layer.set_ub_size(args.ub_size)
+
+
 # Parse config file
 config = configparser.ConfigParser(strict=False,
                                    inline_comment_prefixes=('#', ';'))
