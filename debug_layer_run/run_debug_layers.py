@@ -146,7 +146,16 @@ for i, layer in enumerate(layers.items()):
     try:
         layer_predict = keras_model.predict(layer_input)
         layer_predict.dump(debug_output_folder+layer_name+'.npy')
-
+    except ValueError:
+        if len(layer_input)==1:
+            layer_input=layer_input[0]
+            while layer_input.shape[0]==1:
+                layer_input=layer_input[0]
+            try:
+                layer_predict = keras_model.predict(np.asarray([layer_input]))
+                layer_predict.dump(debug_output_folder+layer_name+'.npy')
+            except:
+                print("Prediction/Shape Error Layer: "+ str(i))
     except:
         print("Prediction Error Layer: "+ str(i))
     

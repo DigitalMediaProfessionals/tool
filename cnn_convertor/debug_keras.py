@@ -6,7 +6,7 @@ from keras.models import load_model
 from keras.utils.generic_utils import CustomObjectScope, deserialize_keras_object
 from keras.layers import deserialize as layer_from_config
 import pathlib
-
+import sys
 
 import os.path
 import h5py
@@ -27,6 +27,7 @@ config.log_device_placement = True  # to log device placement (on which device t
 sess = tf.Session(config=config)
 set_session(sess)  # set this TensorFlow session as the default session for Keras
 
+used_input=0
 
 def get_input(layer_name, network_folder_name, input_params):
 	layer_filename = layer_name.replace('/','_') 
@@ -37,49 +38,69 @@ def get_input(layer_name, network_folder_name, input_params):
 			file=filename
 			output_file = network_folder_name+"/keras_outputs/" + filename
 
+	for filename in os.listdir(network_folder_name+'/keras_outputs_float16'):
+		if re.match(file_regex, filename):
+			file16=filename
+			output_file_16 = network_folder_name+"/keras_outputs_float16/" + file16
+
 	if output_file:
 		data = np.load(output_file)
-	else:
-		print('USING INPUT IMAGE')	
-		r_offs 		= input_params['r_offs']
-		g_offs		= input_params['g_offs']
-		b_offs		= input_params['b_offs']
-		scale 		= input_params['scale']
-
-
-		if input_params['integer_test'] ==1:
-			model_input_shape = input_params['model_input_shape']
-			data=np.random.randint(0,2,size=model_input_shape)
-			cv2.imwrite(network_folder_name+'integer_img.jpg', data)
-		elif input_params['random_input'] == 1:
-			model_input_shape = input_params['model_input_shape']
-			data=np.random.randint(0,255,size=model_input_shape)
-			cv2.imwrite(network_folder_name+'random_img.jpg', data)
+		if output_file_16:
+			data16 = np.load(output_file_16).astype(np.float16)
 		else:
-			input_file 	= input_params['input_file']
-			data = cv2.imread(input_file)
-
-		data=data+[r_offs, g_offs, b_offs]
-		data=data*scale
-		data = np.asarray([data.astype(np.float32)])
+			print('Converting Float32 input for '+layer_name)
+			data16 = data.astype(np.float16)
 		
-		# pose
-		# data = cv2.imread('im1.jpg')
-		# data = np.asarray([data])
-		#mobilenet
-		# data = cv2.imread('image_019.jpg')
-		# data = np.asarray([data])
-		# data = (data.astype(np.float32)-127.5)*0.0078431
-		#squeezenet
-		# data = cv2.imread('image_019.jpg')
-		# data = cv2.resize(data, dsize=(227, 227), interpolation=cv2.INTER_CUBIC)
-		# data = np.asarray([data])
-		# data = (data.astype(np.float32)-128)*1
+	else:
+		if used_input==1:
+			print('ERROR: INPUT IMAGE ALREADY USED')
+			sys.exit()
+		else:
+			print('USING INPUT IMAGE')	
+			r_offs 		= input_params['r_offs']
+			g_offs		= input_params['g_offs']
+			b_offs		= input_params['b_offs']
+			scale 		= input_params['scale']
 
-		file = 'input.npy'
-		data.dump(network_folder_name+'input.npy')
 
-	return data, file
+			if input_params['integer_test'] ==1:
+				model_input_shape = input_params['model_input_shape']
+				data=np.random.randint(0,2,size=model_input_shape)
+				cv2.imwrite(network_folder_name+'integer_img_original.jpg', data)
+			elif input_params['random_input'] == 1:
+				model_input_shape = input_params['model_input_shape']
+				data=np.random.randint(0,255,size=model_input_shape)
+				cv2.imwrite(network_folder_name+'random_img_original.jpg', data)
+			else:
+				input_file 	= input_params['input_file']
+				data = cv2.imread(input_file)
+				cv2.imwrite(network_folder_name+'debug_img_original.jpg', data)
+
+			data=data+[r_offs, g_offs, b_offs]
+			data=data*scale
+			cv2.imwrite(network_folder_name+'input_img_processed.jpg', data)
+			data = np.asarray([data.astype(np.float32)])
+
+			print('Converting Float32 input for '+layer_name)
+			data16 = data.astype(np.float16)
+			
+			# pose
+			# data = cv2.imread('im1.jpg')
+			# data = np.asarray([data])
+			#mobilenet
+			# data = cv2.imread('image_019.jpg')
+			# data = np.asarray([data])
+			# data = (data.astype(np.float32)-127.5)*0.0078431
+			#squeezenet
+			# data = cv2.imread('image_019.jpg')
+			# data = cv2.resize(data, dsize=(227, 227), interpolation=cv2.INTER_CUBIC)
+			# data = np.asarray([data])
+			# data = (data.astype(np.float32)-128)*1
+
+			file = 'input.npy'
+			data.dump(network_folder_name+'input.npy')
+
+	return data, file, data16
 
 def reorder(dims):
 	return (dims[1], dims[0], dims[2])
@@ -104,7 +125,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 	pathlib.Path(network_folder_name+'keras_outputs').mkdir(parents=True, exist_ok=True)
 	pathlib.Path(network_folder_name+'keras_networks').mkdir(parents=True, exist_ok=True)
 	pathlib.Path(network_folder_name+'PLACE_FPGA_DUMPS_HERE').mkdir(parents=True, exist_ok=True)
-
+	pathlib.Path(network_folder_name+'keras_outputs_float16').mkdir(parents=True, exist_ok=True)
 	# network_def = 'C:\\Alex\\Work\\fpga_perf\\tool\\network\\mobilenet.h5'
 
 	f = h5py.File(network_def, mode='r')
@@ -262,28 +283,36 @@ def layer_split(fpga_network, network_def, **kwargs):
 						pass
 
 			input_data=[]
+			input_data16=[]
 			input_files=[]
 			input_nodes =  layer.layer_in
 			for node in input_nodes:
 				input_node_name = node.node_in.name
-				data, filename = get_input(input_node_name, network_folder_name, input_params)
+				data, filename, data16 = get_input(input_node_name, network_folder_name, input_params)
 				input_data.append(data)
 				input_files.append(filename)
+				input_data16.append(data16)
 
 			depth_predict = depth_model.predict(input_data)
 			name = name.replace('/','_') 
 			depth_predict.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_'+name+'.npy')
 			depth_model.save(network_folder_name+'keras_networks/'+str(i).zfill(3)+'_'+name+'.h5')
 			keras_input_map[str(i).zfill(3)+'_'+name]=input_files
-			
 
+			depth_predict16 = depth_model.predict(input_data16).astype(np.float16)
+			depth_predict16.dump(network_folder_name+'keras_outputs_float16/'+str(i).zfill(3)+'_'+name+'.npy')
+			
 			i+=1
+			
 			point_predict = point_model.predict(depth_predict)
 			point_name = point_name.replace('/','_') 
 			point_predict.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_'+point_name+'.npy')
 			point_model.save(network_folder_name+'keras_networks/'+str(i).zfill(3)+'_'+point_name+'.h5')
 			keras_input_map[str(i).zfill(3)+'_'+point_name]=[str(i-1).zfill(3)+'_'+name+'.npy']
-			
+
+			point_predict16 = point_model.predict(depth_predict16).astype(np.float16)
+			point_predict16.dump(network_folder_name+'keras_outputs_float16/'+str(i).zfill(3)+'_'+point_name+'.npy')
+
 			i+=1
 
 		else:
@@ -400,27 +429,35 @@ def layer_split(fpga_network, network_def, **kwargs):
 
 
 			input_data=[]
+			input_data16=[]
 			input_files=[]
 			input_nodes =  layer.layer_in
 			for node in input_nodes:
 				input_node_name = node.node_in.name
-				in_data, filename = get_input(input_node_name, network_folder_name, input_params)
-				if in_data.ndim==2:
-					if in_data.shape[0]==1:
-						in_data=np.asarray([[in_data]])
-				if in_data.ndim==4:
-					if in_data.shape[0]==1:
-						if in_data.shape[1]==1:
-							if in_data.shape[2]==1:
-								if keras_model.input_shape[1]==in_data.shape[3]:
-									in_data = in_data[0][0]
-				input_data.append(in_data)
+				data, filename, data16 = get_input(input_node_name, network_folder_name, input_params)
+				if data.ndim==2:
+					if data.shape[0]==1:
+						data=np.asarray([[data]])
+						data16=np.asarray([[data16]])
+				if data.ndim==4:
+					if data.shape[0]==1:
+						if data.shape[1]==1:
+							if data.shape[2]==1:
+								if keras_model.input_shape[1]==data.shape[3]:
+									data = data[0][0]
+									data16 = data16[0][0]
+				input_data.append(data)
 				input_files.append(filename)
+				input_data16.append(data16)
 
 			name = name.replace('/','_')
 			try:
 				prediction = keras_model.predict(input_data)
 				prediction.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_'+name+'.npy')
+
+				prediction16 = keras_model.predict(input_data16).astype(np.float16)
+				prediction16.dump(network_folder_name+'keras_outputs_float16/'+str(i).zfill(3)+'_'+name+'.npy')
+
 			except:
 				print("prediction error")
 			

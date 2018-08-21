@@ -42,7 +42,7 @@ def get_layer_data(layer, data1, data2):
     datasets=[keras_outputs, fpga_outputs, debug_outputs]    
     dataset1 = np.asarray(datasets[data1])
 
-    if dataset1[layer].shape[0]==1:
+    if (dataset1[layer].shape[0]==1)  or (len(dataset1[layer].shape)==1):
         x=dataset1[layer].size
         if len(dataset1[layer].shape)==3:
             k_out=None
@@ -54,7 +54,7 @@ def get_layer_data(layer, data1, data2):
                 f_out = datasets[1][layer][0][0]
             if debug_output_length>layer:
                 d_out = datasets[2][layer][0][0]
-            return x, k_out, f_out, d_out, 0, 0
+            
         else:
             k_out=None
             f_out=None
@@ -65,7 +65,7 @@ def get_layer_data(layer, data1, data2):
                 f_out = datasets[1][layer]
             if debug_output_length>layer:
                 d_out = datasets[2][layer]
-            return x, k_out, f_out, d_out, 0, 0
+        return x, k_out, f_out, d_out, 0, 0
 
     else:
         min_val=[]
@@ -218,15 +218,16 @@ def update_plot(attrname, old, new):
     layer=layer_dict[layerselect.value]
     data_dict=make_data_dict(layer)
     view=view_dict[viewselect.value]
-
-    if data1select.value not in data_dict:
-        data1select.value=list(data_dict.keys())[0]
-    if data2select.value not in data_dict:
-        data2selectvalue=list(data_dict.keys())[0]
     data1select.options=list(data_dict.keys())
     data2select.options=list(data_dict.keys())
-    data1=data_dict[data1select.value]
-    data2=data_dict[data2select.value]
+    if data1select.value not in data_dict:
+        data1 = list(data_dict.values())[0]
+    else:
+        data1=data_dict[data1select.value]
+    if data2select.value not in data_dict:
+        data2 = list(data_dict.values())[0]
+    else:
+        data2=data_dict[data2select.value]
 
     p, channels=make_plot(layer,view, data1, data2)
 
@@ -244,7 +245,7 @@ if not os.path.exists(network_debug_folder):
     print("Folder does not exist")
     sys.exit(0)
 
-# network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\mobilenet\\"
+# network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\mobilenet_integer_model\\"
 
 
 keras_folder = network_debug_folder + 'keras_outputs\\'
@@ -300,7 +301,7 @@ for i in range(len(fpga_files)):
         fpga_dump = np.fromfile(fpga_files[i], dtype=np.float32)
     # print(i)
     fpga_dump = remap(fpga_dump, keras_outputs[i].shape)
-    fmax = np.max(fpga_dump)
+    fmax = np.nanmax(fpga_dump[fpga_dump!=np.inf])
     fpga_dump[np.isinf(fpga_dump)] = fmax
     fpga_dump[np.isnan(fpga_dump)] = fmax
     fpga_outputs.append(fpga_dump)
@@ -333,7 +334,7 @@ view_dict={
     'Difference'    : 2,
     'Normalised Difference':3,
 }
-layer=28
+layer=0
 data_dict=make_data_dict(layer)
 
 layerselect = Select(title="Layer:", value=layer_name[layer], options=layer_name)
@@ -343,7 +344,6 @@ if len(data_dict.keys())>1:
     data2select=Select(title="Dataset 2:", value=list(data_dict.keys())[1], options=list(data_dict.keys()))
 else:
     data2select=Select(title="Dataset 2:", value=list(data_dict.keys())[0], options=list(data_dict.keys()))
-
 layerselect.on_change('value', update_plot)
 viewselect.on_change('value', update_plot)
 data1select.on_change('value', update_plot)
@@ -371,7 +371,7 @@ if args.save_layers==1:
     
 
 
-p, channels=make_plot(layer, 0, 0, 0)
+p, channels=make_plot(layer, 1, 0, 1)
 
 curdoc().add_root(column(row(layerselect, viewselect, data1select, data2select)))
 curdoc().add_root(column(p))
