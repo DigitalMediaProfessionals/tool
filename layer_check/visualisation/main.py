@@ -39,7 +39,7 @@ def point_rel_difference(p,f):
     return reldiff
 
 def get_layer_data(layer, data1, data2):
-    datasets=[keras_outputs, fpga_outputs, debug_outputs]    
+    datasets=[keras_outputs, fpga_outputs, debug_outputs, keras16_outputs]    
     dataset1 = np.asarray(datasets[data1])
 
     if (dataset1[layer].shape[0]==1)  or (len(dataset1[layer].shape)==1):
@@ -54,18 +54,23 @@ def get_layer_data(layer, data1, data2):
                 f_out = datasets[1][layer][0][0]
             if debug_output_length>layer:
                 d_out = datasets[2][layer][0][0]
+            if keras16_output_length>layer:
+                k16_out = datasets[3][layer][0][0]
             
         else:
             k_out=None
             f_out=None
             d_out=None
+            k16_out=None
             if keras_output_length>layer:
                 k_out = datasets[0][layer]
             if fpga_output_length>layer:
                 f_out = datasets[1][layer]
             if debug_output_length>layer:
                 d_out = datasets[2][layer]
-        return x, k_out, f_out, d_out, 0, 0
+            if keras16_output_length>layer:
+                k16_out = datasets[3][layer]
+        return x, k_out, f_out, d_out, 0, 0, k16_out
 
     else:
         min_val=[]
@@ -87,7 +92,7 @@ def get_layer_data(layer, data1, data2):
         channels = dataset1[layer].shape[2]
         d1_out = np.rollaxis(dataset1[layer], 2)
         d2_out = np.rollaxis(dataset2[layer], 2)
-        return 0, d1_out, d2_out,None, min_val, max_val
+        return 0, d1_out, d2_out,None, min_val, max_val, None
 
 def get_image(channel, view, dataset1, dataset2):
     if view==0:
@@ -108,12 +113,14 @@ def make_data_dict(layer):
         data_dict['FPGA']=1
     if debug_output_length>layer:
         data_dict['Debug']=2
+    if keras16_output_length>layer:
+        data_dict['Keras16']=3
     return data_dict
 
 
 def make_plot(layer, view, data1, data2):
     TOOLS = "pan,wheel_zoom,box_zoom,reset,save"
-    length, dataset1, dataset2, dataset3, min_val, max_val = get_layer_data(layer, data1, data2)
+    length, dataset1, dataset2, dataset3, min_val, max_val, dataset4 = get_layer_data(layer, data1, data2)
     plotgrid=[]
 
     if length == 0:
@@ -192,8 +199,11 @@ def make_plot(layer, view, data1, data2):
             source_dict['fpga'] = dataset2
             hover_tooltips.append(("fpga", "@fpga"))
         if debug_output_length>layer:
-            source_dict['debug'] = dataset2
+            source_dict['debug'] = dataset3
             hover_tooltips.append(("debug", "@debug"))
+        if keras_output_length>layer:
+            source_dict['keras16'] = dataset4
+            hover_tooltips.append(("keras16", "@keras16"))
         source=ColumnDataSource(data=source_dict)
         hover = HoverTool(tooltips = hover_tooltips)
         # source=ColumnDataSource(data=dict(x=x_vals, keras=dataset1, fpga=dataset2, debug=dataset3))
@@ -205,6 +215,9 @@ def make_plot(layer, view, data1, data2):
             f_line = p.line('x', 'fpga', source=source,legend=dict(value="FPGA"), line_color="blue", line_width=1)
         if debug_output_length>layer:
             d_line = p.line('x', 'debug', source=source,legend=dict(value="Debug"), line_color="green", line_width=1)
+        if keras_output_length>layer:
+            k16_line = p.line('x', 'keras16', source=source, legend=dict(value="Keras16"), line_color="red", line_width=1)
+        
         p.legend.click_policy="hide"
         
         print(hover.renderers)
@@ -249,6 +262,7 @@ if not os.path.exists(network_debug_folder):
 
 
 keras_folder = network_debug_folder + 'keras_outputs\\'
+keras16_folder = network_debug_folder + 'keras_outputs_float16\\'
 fpga_folder = network_debug_folder + 'PLACE_FPGA_DUMPS_HERE\\'
 debug_output_folder=network_debug_folder+'fpga_dump_debug_outputs\\'
 visual_output_folder=network_debug_folder+'visualisation_outputs\\'
@@ -262,6 +276,7 @@ pathlib.Path(visual_output_folder).mkdir(parents=True, exist_ok=True)
 
 fpga_files = glob.glob(fpga_folder+'/*')
 keras_files = glob.glob(keras_folder+'/*')
+keras16_files = glob.glob(keras16_folder+'/*')
 debug_files = glob.glob(debug_output_folder+'/*')
 
 
@@ -294,6 +309,11 @@ for file in keras_files:
     keras_outputs.append(np.load(file)[0])
 # keras_outputs = keras_outputs[:num_files]
 
+keras16_outputs = []    
+for file in keras16_files:
+    keras16_outputs.append(np.load(file)[0])
+
+
 fpga_outputs=[]
 for i in range(len(fpga_files)):
     fpga_dump = np.fromfile(fpga_files[i], dtype=np.float16)
@@ -315,6 +335,7 @@ for file in debug_files:
 
 
 keras_output_length = len(keras_outputs)
+keras16_output_length = len(keras16_outputs)
 fpga_output_length = len(fpga_outputs)
 debug_output_length = len(debug_outputs)
 
@@ -371,7 +392,7 @@ if args.save_layers==1:
     
 
 
-p, channels=make_plot(layer, 1, 0, 1)
+p, channels=make_plot(layer, 0, 0, 1)
 
 curdoc().add_root(column(row(layerselect, viewselect, data1select, data2select)))
 curdoc().add_root(column(p))
