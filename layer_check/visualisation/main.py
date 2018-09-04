@@ -40,14 +40,15 @@ def point_rel_difference(p,f):
 
 def get_layer_data(layer, data1, data2):
     datasets=[keras_outputs, fpga_outputs, debug_outputs, keras16_outputs]    
-    dataset1 = np.asarray(datasets[data1])
-
+    # dataset1 = np.asarray(datasets[data1])
+    dataset1 = datasets[data1]
     if (dataset1[layer].shape[0]==1)  or (len(dataset1[layer].shape)==1):
         x=dataset1[layer].size
         if len(dataset1[layer].shape)==3:
             k_out=None
             f_out=None
             d_out=None
+            k16_out=None
             if keras_output_length>layer:
                 k_out = datasets[0][layer][0][0]
             if fpga_output_length>layer:
@@ -88,7 +89,8 @@ def get_layer_data(layer, data1, data2):
         min_val=np.min(min_val)
         max_val=np.max(max_val)
 
-        dataset2 = np.asarray(datasets[data2])
+        # dataset2 = np.asarray(datasets[data2])
+        dataset2 = datasets[data2]
         channels = dataset1[layer].shape[2]
         d1_out = np.rollaxis(dataset1[layer], 2)
         d2_out = np.rollaxis(dataset2[layer], 2)
@@ -133,7 +135,7 @@ def make_plot(layer, view, data1, data2):
         for channel in range(channels):
             img=get_image(channel, view, dataset1, dataset2)
             
-            img=img[::-1] #image shows upside down by default
+            # img=img[::-1] #image shows upside down by default
             if view==3: 
                 img=np.pad(img, pad_width=1, mode='constant', constant_values=1)
                 view_label='Normalised Difference'
@@ -160,6 +162,7 @@ def make_plot(layer, view, data1, data2):
         if imgs[0].shape!=imgs[-1].shape:
             imgs[-1] = np.pad(imgs[-1], pad_width=[(0,0),(0,imgs[0].shape[1]-imgs[-1].shape[1])], mode='constant', constant_values=0)
         imgs = np.vstack(imgs)
+        imgs=imgs[::-1]
         # imgs=imgs[:1000]
         ratio = imgs.shape[0]/imgs.shape[1]
         width=width*200
@@ -171,6 +174,7 @@ def make_plot(layer, view, data1, data2):
         p = figure(title=view_label + ' View. Layer: '+ os.path.basename(keras_files[layer]),x_range=(0, imgs.shape[1]), y_range=(0, imgs.shape[0]),toolbar_location="left", plot_width=width, plot_height=height)
         p.title.text_font_size = "20px"
         if view==2:
+            # color_mapper = LinearColorMapper(palette="Viridis256", low=-0.4, high=0.6)
             color_mapper = LinearColorMapper(palette="Viridis256", low=np.min(imgs), high=np.max(imgs))
         elif view==3:
             color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
@@ -192,16 +196,16 @@ def make_plot(layer, view, data1, data2):
         source_dict={}
         source_dict['x']=x_vals
         hover_tooltips = [("x", "$x{(0)}")]
-        if keras_output_length>layer:
+        if dataset1 is not None and keras_output_length>layer:
             source_dict['keras'] = dataset1
             hover_tooltips.append(("keras", "@keras"))
-        if fpga_output_length>layer:
+        if dataset2 is not None and fpga_output_length>layer:
             source_dict['fpga'] = dataset2
             hover_tooltips.append(("fpga", "@fpga"))
-        if debug_output_length>layer:
+        if dataset3 is not None and debug_output_length>layer:
             source_dict['debug'] = dataset3
             hover_tooltips.append(("debug", "@debug"))
-        if keras_output_length>layer:
+        if dataset4 is not None and keras_output_length>layer:
             source_dict['keras16'] = dataset4
             hover_tooltips.append(("keras16", "@keras16"))
         source=ColumnDataSource(data=source_dict)
@@ -215,7 +219,7 @@ def make_plot(layer, view, data1, data2):
             f_line = p.line('x', 'fpga', source=source,legend=dict(value="FPGA"), line_color="blue", line_width=1)
         if debug_output_length>layer:
             d_line = p.line('x', 'debug', source=source,legend=dict(value="Debug"), line_color="green", line_width=1)
-        if keras_output_length>layer:
+        if keras16_output_length>layer:
             k16_line = p.line('x', 'keras16', source=source, legend=dict(value="Keras16"), line_color="red", line_width=1)
         
         p.legend.click_policy="hide"
@@ -258,7 +262,7 @@ if not os.path.exists(network_debug_folder):
     print("Folder does not exist")
     sys.exit(0)
 
-# network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\mobilenet_integer_model\\"
+# network_debug_folder = "C:\\Alex\\Work\\fpga_perf\\debug\\MConv_Stage1_L1_5_model\\"
 
 
 keras_folder = network_debug_folder + 'keras_outputs\\'
@@ -397,3 +401,4 @@ p, channels=make_plot(layer, 0, 0, 1)
 curdoc().add_root(column(row(layerselect, viewselect, data1select, data2select)))
 curdoc().add_root(column(p))
 show(column(row( data1select, data2select, layerselect, viewselect), p))
+print("done")

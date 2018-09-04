@@ -52,6 +52,9 @@ def get_input(layer_name, network_folder_name, input_params):
 			data16 = data.astype(np.float16)
 		
 	else:
+		# data = np.load("C:\\Alex\\Work\\fpga_perf\\im1_fpga.npy")
+		# data16 = data.astype(np.float16)
+		
 		if used_input==1:
 			print('ERROR: INPUT IMAGE ALREADY USED')
 			sys.exit()
@@ -61,6 +64,7 @@ def get_input(layer_name, network_folder_name, input_params):
 			g_offs		= input_params['g_offs']
 			b_offs		= input_params['b_offs']
 			scale 		= input_params['scale']
+			transpose	= input_params['transpose']
 
 
 			if input_params['integer_test'] ==1:
@@ -114,6 +118,7 @@ def process_inputs(params):
 	inputs['g_offs'] = params.g_offs
 	inputs['b_offs'] = params.b_offs
 	inputs['scale'] = params.scale
+	inputs['transpose'] = params.transpose
 	return inputs
 
 # def layer_split(fpga_network, network_def, input_file,r_offs=0, g_offs=0, b_offs=0,scale=1, transpose=1,  network_folder_name=None):

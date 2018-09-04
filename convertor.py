@@ -28,13 +28,9 @@ import os
 import configparser
 import logging
 from importlib import import_module
-from cnn_convertor import cnn_parser, fpga_layer, debug_keras
-from keras.models import load_model
-from keras.utils.generic_utils import CustomObjectScope
-import keras
-import tensorflow as tf
-import pathlib
-import numpy as np
+from cnn_convertor import cnn_parser, fpga_layer
+
+
 
 # Handle parameters
 parser = argparse.ArgumentParser(description="DNN to FPGA convertor")
@@ -47,16 +43,22 @@ parser.add_argument("--r_offs", type=float, default=0, help="R offset for debug"
 parser.add_argument("--g_offs", type=float, default=0, help="G offset for debug")
 parser.add_argument("--b_offs", type=float, default=0, help="B offset for debug")
 parser.add_argument("--scale", type=float, default=1, help="scale for debug")
+parser.add_argument("--transpose", type=bool, default=1, help="transpose on/off")
 	
 args = parser.parse_args()
 debug=args.debug
-integer_test = args.integer_test
-# if debug:
-    # if args.input_file is None:
-    #     sys.exit("Input image required")
+integer_test=args.integer_test or None
 
 if debug:
     print("Debug mode")
+    from keras.models import load_model
+    from keras.utils.generic_utils import CustomObjectScope
+    import keras
+    import tensorflow as tf
+    import pathlib
+    import numpy as np
+    from cnn_convertor import debug_keras
+
     # parse config file
 config = configparser.ConfigParser(strict=False,
                                    inline_comment_prefixes=('#', ';'))
