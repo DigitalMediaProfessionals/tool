@@ -29,6 +29,8 @@ set_session(sess)  # set this TensorFlow session as the default session for Kera
 
 used_input=0
 
+import googlenet_custom_layers
+
 def get_input(layer_name, network_folder_name, input_params):
 	layer_filename = layer_name.replace('/','_') 
 	file_regex = "^\d{0,4}_"+layer_filename+"\.npy"
@@ -54,7 +56,7 @@ def get_input(layer_name, network_folder_name, input_params):
 	else:
 		# data = np.load("C:\\Alex\\Work\\fpga_perf\\im1_fpga.npy")
 		# data16 = data.astype(np.float16)
-		
+		global used_input
 		if used_input==1:
 			print('ERROR: INPUT IMAGE ALREADY USED')
 			sys.exit()
@@ -83,6 +85,10 @@ def get_input(layer_name, network_folder_name, input_params):
 			data=data+[r_offs, g_offs, b_offs]
 			data=data*scale
 			cv2.imwrite(network_folder_name+'input_img_processed.jpg', data)
+
+			if input_params['channels_first']==True:
+				data = np.rollaxis(data,2)
+
 			data = np.asarray([data.astype(np.float32)])
 
 			print('Converting Float32 input for '+layer_name)
@@ -103,6 +109,8 @@ def get_input(layer_name, network_folder_name, input_params):
 
 			file = 'input.npy'
 			data.dump(network_folder_name+'input.npy')
+			
+			used_input=1
 
 	return data, file, data16
 
@@ -140,14 +148,16 @@ def layer_split(fpga_network, network_def, **kwargs):
 	globs = globals()  # All layers.
 	globs['Model'] = models.Model
 	globs['Sequential'] = models.Sequential
-	custom_objects = {'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}
+	custom_objects = {'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D, 'LRN': googlenet_custom_layers.LRN}
 
-	globs['Conv2D']= layers.Conv2D
-	globs['relu6']=keras.applications.mobilenet.relu6
-	globs['DepthwiseConv2D']=keras.applications.mobilenet.DepthwiseConv2D
+	# globs['Conv2D']= layers.Conv2D
+	# globs['LRN']= googlenet_custom_layers.LRN
+	# globs['relu6']=keras.applications.mobilenet.relu6
+	# globs['DepthwiseConv2D']=keras.applications.mobilenet.DepthwiseConv2D
 	
 	model_load = load_model(network_def, custom_objects=custom_objects)
 	input_params['model_input_shape'] = model_load.input_shape[1:]
+	input_params['channels_first'] = model_load.layers[1].data_format=='channels_first'
 	if input_params['integer_test'] !=1:
 		model_load.save(network_folder_name+network_name+'_original_model.h5')
 	model_load_weights={}
@@ -178,23 +188,57 @@ def layer_split(fpga_network, network_def, **kwargs):
 			print('pointlayer')
 			continue
 		
-		input_nodes = first_layer.input_nodes
-		if len(input_nodes)>1:
-			input_dims = []
-			for input_node in input_nodes:
-				input_dims.append(reorder(input_node.output_dim))
-			keras_input = []
-			for input_dim in input_dims:
-				keras_input.append(Input(shape=input_dim))
-		else:
-			if len(first_layer.input_dim)==3:
-				input_dim = reorder(first_layer.input_dim)
-			elif len(first_layer.input_dim)==1:
-				input_dim = first_layer.input_dim
+		# input_nodes = first_layer.input_nodes
+		# if len(input_nodes)>1:
+		# 	input_dims = []
+		# 	for input_node in input_nodes:
+		# 		if input_params['channels_first'] == True:
+		# 			dim = (input_node.output_dim[2], input_node.output_dim[0], input_node.output_dim[1])
+		# 		else:
+		# 			dim = reorder(input_node.output_dim)
+		# 		input_dims.append(dim)
+		# 	keras_input = []
+		# 	for input_dim in input_dims:
+		# 		keras_input.append(Input(shape=input_dim))
+		# else:
+		# 	if len(first_layer.input_dim)==3:
+		# 		if input_params['channels_first'] == True:
+		# 			input_dim = first_layer.input_dim
+		# 		else:
+		# 			input_dim = reorder(first_layer.input_dim)
+		# 	elif len(first_layer.input_dim)==1:
+		# 		input_dim = first_layer.input_dim
 
-			keras_input = Input(shape=input_dim)
+		# 	keras_input = Input(shape=input_dim)
 
 		if model_load.get_layer(name).__class__.__name__ == 'SeparableConv2D':
+
+			input_nodes = first_layer.input_nodes
+			if len(input_nodes)>1:
+				input_dims = []
+				for input_node in input_nodes:
+					if input_params['channels_first'] == True:
+						dim = (input_node.output_dim[2], input_node.output_dim[0], input_node.output_dim[1])
+					else:
+						dim = reorder(input_node.output_dim)
+					input_dims.append(dim)
+				keras_input = []
+				for input_dim in input_dims:
+					keras_input.append(Input(shape=input_dim))
+			else:
+				if len(first_layer.input_dim)==3:
+					if input_params['channels_first'] == True:
+						input_dim = first_layer.input_dim
+					else:
+						input_dim = reorder(first_layer.input_dim)
+				elif len(first_layer.input_dim)==1:
+					input_dim = first_layer.input_dim
+
+				keras_input = Input(shape=input_dim)
+
+
+
+
 			print('SEPCONV')
 			sepconv_layer = model_load.get_layer(name)
 			sepconv_weights = model_load_weights[name]
@@ -216,7 +260,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 				except:
 					pass
 			
-			with CustomObjectScope({'relu6': relu6}):
+			with CustomObjectScope(custom_objects):
 				depth_layer = keras.layers.DepthwiseConv2D(**depthconfig)(keras_input)
 			depth_model = Model(inputs=keras_input, outputs = depth_layer)
 			depth_bias_shape = depth_model.get_weights()[1].shape
@@ -241,7 +285,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 			for node_layer in node_layers:
 
 				if node_layer==point_layer_fpga.node_in:
-					with CustomObjectScope({'relu6': relu6}):
+					with CustomObjectScope(custom_objects):
 						keras_out_layer = Conv2D(name=point_name, kernel_size=(1,1), **pointconfig)(keras_out_layer)
 				else:
 					node_layer_name = node_layer.name
@@ -251,7 +295,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 						print('model load error')
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
-					with CustomObjectScope({'relu6': relu6}):
+					with CustomObjectScope(custom_objects):
 						keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 			
@@ -260,7 +304,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 					keras_layer = model_load.get_layer(sub_layer_name)
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
-					with CustomObjectScope({'relu6': relu6}):
+					with CustomObjectScope(custom_objects):
 						keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 
@@ -269,7 +313,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 					keras_layer = model_load.get_layer(sub_layer_name)
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
-					with CustomObjectScope({'relu6': relu6}):
+					with CustomObjectScope(custom_objects):
 						keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 			point_model = Model(inputs=point_input, outputs = keras_out_layer)
@@ -373,9 +417,24 @@ def layer_split(fpga_network, network_def, **kwargs):
 			
 			for node_layer in node_layers:	
 				node_layer_name = node_layer.name
+				keras_layer = model_load.get_layer(node_layer_name)
+				keras_layer_class = keras_layer.__class__
+				keras_layer_config = keras_layer.get_config()
+				unused_args = ['mode_type', 'output_shape_type', 'output_mask_type']
+				for arg in unused_args:
+					try:
+						del keras_layer_config[arg]
+					except:
+						pass
 				print(node_layer_name)
 				# output_layer_name = node_layer_name
 				node_layer_inputs = []
+				keras_input_shape = keras_layer.input_shape
+				if (input_params['channels_first'] == True) and (len(node_layer.input_dim)==3):
+					node_input_dim = (node_layer.input_dim[2], node_layer.input_dim[0], node_layer.input_dim[1])
+				else:
+					node_input_dim = node_layer.input_dim
+
 				for input_node in node_layer.input_nodes:
 					if input_node in input_nodes:
 						if input_node.name in model_inputs:
@@ -383,9 +442,15 @@ def layer_split(fpga_network, network_def, **kwargs):
 						else:
 							# dim=input_node.output_dim
 							if len(input_node.output_dim)==3:
-								dim = reorder(input_node.output_dim)
+								if input_params['channels_first'] == True:
+									dim = (input_node.output_dim[2], input_node.output_dim[0], input_node.output_dim[1])
+									output_dim = (layer.node_out.input_dim[2], layer.node_out.input_dim[0], layer.node_out.input_dim[1])
+								else:
+									dim = reorder(input_node.output_dim)
+									output_dim = reorder(layer.node_out.input_dim)
 							elif len(input_node.output_dim)==1:
 								dim = input_node.output_dim
+								output_dim = layer.node_out.input_dim
 							input_layer=Input(shape=dim)
 							model_inputs[input_node.name] = input_layer
 							model_inputs_list.append(input_layer)
@@ -395,33 +460,45 @@ def layer_split(fpga_network, network_def, **kwargs):
 						node_layer_inputs.append(keras_layers[input_node.name])
 				if len(node_layer_inputs)==1:
 					node_layer_inputs=node_layer_inputs[0]
-			
 
-				keras_layer = model_load.get_layer(node_layer_name)
 
-				keras_layer_class = keras_layer.__class__
-				keras_layer_config = keras_layer.get_config()
-				with CustomObjectScope({'relu6': relu6}):
-					keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(node_layer_inputs)
-					# keras_out_layer.set_weights(keras_layer.get_weights())
-			
+				if ((node_layer.type.name == 'Pooling') and (len(node_layer.input_nodes)==1) and (node_input_dim!=keras_input_shape[1:]) 
+					and (keras_layer._inbound_nodes[0].inbound_layers[0].__class__.__name__=='ZeroPadding2D')):
+					
+					pad_layer_name = keras_layer._inbound_nodes[0].inbound_layers[0].name
+					pad_layer = model_load.get_layer(pad_layer_name)
+					pad_layer_class = pad_layer.__class__
+					pad_layer_config = pad_layer.get_config()
+
+					with CustomObjectScope(custom_objects):
+						keras_layers[node_layer_name] = pad_layer_class(**pad_layer_config)(node_layer_inputs)
+						keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
+
+				else:
+					with CustomObjectScope(custom_objects):
+						keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(node_layer_inputs)
+						# keras_out_layer.set_weights(keras_layer.get_weights())
+				
 				if node_layer.bn_node:
 					sub_layer_name = node_layer.bn_node.name
 					keras_layer = model_load.get_layer(sub_layer_name)
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
-					with CustomObjectScope({'relu6': relu6}):
+					with CustomObjectScope(custom_objects):
 						keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 
 				if node_layer.act_node:
 					sub_layer_name = node_layer.act_node.name
-					keras_layer = model_load.get_layer(sub_layer_name)
-					keras_layer_class = keras_layer.__class__
-					keras_layer_config = keras_layer.get_config()
-					with CustomObjectScope({'relu6': relu6}):
-						keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
-						# keras_out_layer.set_weights(keras_layer.get_weights())
+					try:
+						keras_layer = model_load.get_layer(sub_layer_name)
+						keras_layer_class = keras_layer.__class__
+						keras_layer_config = keras_layer.get_config()
+						with CustomObjectScope(custom_objects):
+							keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
+							# keras_out_layer.set_weights(keras_layer.get_weights())
+					except ValueError:
+						pass
 
 			keras_model = Model(inputs = model_inputs_list, outputs = keras_layers[node_layer_name])
 			for keras_model_layer in keras_model.layers:
