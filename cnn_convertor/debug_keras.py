@@ -29,6 +29,7 @@ set_session(sess)  # set this TensorFlow session as the default session for Kera
 
 used_input=0
 
+
 import googlenet_custom_layers
 
 def get_input(layer_name, network_folder_name, input_params):
@@ -46,6 +47,8 @@ def get_input(layer_name, network_folder_name, input_params):
 			output_file_16 = network_folder_name+"/keras_outputs_float16/" + file16
 
 	if output_file:
+		print("data exists")
+		print(output_file)
 		data = np.load(output_file)
 		if output_file_16:
 			data16 = np.load(output_file_16).astype(np.float16)
@@ -148,7 +151,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 	globs = globals()  # All layers.
 	globs['Model'] = models.Model
 	globs['Sequential'] = models.Sequential
-	custom_objects = {'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D, 'LRN': googlenet_custom_layers.LRN}
+	custom_objects = {'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D, 'LRN': googlenet_custom_layers.LRN2D}
 
 	# globs['Conv2D']= layers.Conv2D
 	# globs['LRN']= googlenet_custom_layers.LRN
@@ -371,7 +374,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 			for out_node in layer.node_out.output_nodes:
 				out_nodes.append(out_node)
 			
-
+			
 			for in_node in layer.node_in.input_nodes:
 				input_nodes.append(in_node)
 				if layer.node_in==layer.node_out:
@@ -500,7 +503,11 @@ def layer_split(fpga_network, network_def, **kwargs):
 					except ValueError:
 						pass
 
+			name = name.replace('/','_')
 			keras_model = Model(inputs = model_inputs_list, outputs = keras_layers[node_layer_name])
+			keras_model_file = network_folder_name+'/'+network_name+str(i)+name+'.png'
+
+			plot_model(keras_model, to_file=keras_model_file, show_shapes=True)
 			for keras_model_layer in keras_model.layers:
 				keras_model_layer_name = keras_model_layer.name
 				try:
@@ -532,7 +539,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 				input_files.append(filename)
 				input_data16.append(data16)
 
-			name = name.replace('/','_')
+			
 			try:
 				prediction = keras_model.predict(input_data)
 				prediction.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_'+name+'.npy')
