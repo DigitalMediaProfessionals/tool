@@ -477,12 +477,7 @@ def gen_source_header(of, name, net):
     of.write('  set_num_output_layers({0});\n\n'.format(net.num_output_layers))
     for n in range(len(net.layer)):
         of.write('  Layer_{0}();\n'.format(n))
-    of.write('\n'
-             '  if (!GenerateCommandLists()) {\n'
-             '    return false;\n'
-             '  }\n\n'
-             '  return true;\n'
-             '}\n\n')
+    of.write('\n  return true;\n}\n\n')
 
 
 def gen_source_conv(of, name, n, layer, quantization):
