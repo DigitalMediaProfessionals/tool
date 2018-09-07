@@ -624,7 +624,7 @@ def gen_source_conv(of, name, n, layer, quantization):
         of.write('  conf.run[{0}].actfunc = {1};  // Activation Function: 0 = None, 1 = Tanh, 2 = Leaky ReLU, 3 = Sigmoid, 4 = PReLU, 5 = ELU, 6 = ReLU6\n'.format(i, actfunc))
         of.write('  conf.run[{0}].actfunc_param = 0x{1:X};  // Leaky ReLU parameter (NOTE: 0x2E66 is 0.1 in FP16)\n'.format(i, actparam))
         of.write('  conf.run[{0}].rectifi_en = 0;  // Rectification, i.e. max(0, x) (NOTE: Can be applied after non-ReLU activation function)\n'.format(i))
-        of.write('  conf.run[{0}].lrn = 0x{1:X};  // [0] : 1 = LRN enable, 0 = LRN disable, [1] : 1 = incl. power func, 0 = excl., [8:11] = x^2 scale factor log2\n'.format(i, (1027 if is_lrn else 0)))
+        of.write('  conf.run[{0}].lrn = 0x{1:X};  // [0] : 1 = LRN enable, 0 = LRN disable, [1] : 1 = incl. power func, 0 = excl., [8:11] = x^2 scale factor log2\n'.format(i, (0x503 if is_lrn else 0)))
         weight_offset += get_weight_size(run.conv, quantization)
 
 
