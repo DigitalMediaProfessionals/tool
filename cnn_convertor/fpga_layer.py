@@ -559,7 +559,7 @@ def gen_source_conv(of, name, n, layer, quantization):
             node_in = run.conv
             if node_in.act_node:
                 actfunc = get_actfunc(node_in.act_node.type)
-                actparam = int(np.array([node_in.act_node.param.relu_param], dtype=np.float16).view(np.uint16)[0])
+                actparam = np.float16(node_in.act_node.param.relu_param).view(np.uint16)
         node_out = run.conv
         if run.pool is not None:
             node_out = run.pool
