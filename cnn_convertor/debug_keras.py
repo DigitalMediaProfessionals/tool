@@ -160,7 +160,10 @@ def layer_split(fpga_network, network_def, **kwargs):
 	
 	model_load = load_model(network_def, custom_objects=custom_objects)
 	input_params['model_input_shape'] = model_load.input_shape[1:]
-	input_params['channels_first'] = model_load.layers[1].data_format=='channels_first'
+	try:
+		input_params['channels_first'] = model_load.layers[0].data_format=='channels_first'
+	except:
+		input_params['channels_first'] = model_load.layers[1].data_format=='channels_first'
 	if input_params['integer_test'] !=1:
 		model_load.save(network_folder_name+network_name+'_original_model.h5')
 	model_load_weights={}
