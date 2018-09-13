@@ -640,13 +640,16 @@ def gen_source_fc(of, name, n, layer):
     actparam = 0
     if node.act_node:
         if node.act_node.type == NodeType.ReLU:
-            actfunc = 0x10
+            actfunc = 1
             if node.act_node.param.relu_param != 0.0:
-                actfunc = 0x30
-                actparam = np.float16(node.act_node.param.relu_param)
-                actparam = actparam.data[1] << 8 | actparam.data[0]
+                actfunc = 3
+                actparam = np.float16(node.act_node.param.relu_param).view(np.uint16)
+        elif node.act_node.type == NodeType.TanH:
+            actfunc = 2
+        elif node.act_node.type == NodeType.Sigmoid:
+            actfunc = 4
         else:
-            actfunc = 0x20
+            raise ValueError("Unsupported activation: %s" % node.act_node.type)
     of.write('// Layer_{0}: Fully Connected Layer\n'.format(n))
     of.write('//	->: {0}\n'.format(node.name))
     of.write('void C{0}::Layer_{1}() '.format(name, n))
@@ -665,7 +668,7 @@ def gen_source_fc(of, name, n, layer):
     of.write('  conf.output_buf.mem = io_mem_;\n'
              '  conf.output_buf.offs = {0};\n'.format(layer.output_addr_offset))
     of.write('  conf.weight_fmt = 1;  // 0 = unquantized weight matrix, 1 = qunatized\n')
-    of.write('  conf.actfunc = 0x{0:X};  // Activation Function: 0 = None, 1 = Tanh, 2 = Leaky ReLU, 3 = Sigmoid, 4 = PReLU, 5 = ELU, 6 = ReLU6\n'.format(actfunc))
+    of.write('  conf.actfunc = {0};  // Activation Function: 0 = None, 1 = ReLU, 2 = Tanh, 3 = Leaky ReLU, 4 = Sigmoid, 5 = PReLU (PReLU must be used with POST-OP=1)\n'.format(actfunc))
     of.write('  conf.actfunc_param = 0x{0:X};  // Leaky ReLU parameter (in FP16 format), 0 = non-leaky\n'.format(actparam))
     weight_offset += size
 
