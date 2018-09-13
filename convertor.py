@@ -51,10 +51,11 @@ integer_test=args.integer_test or None
 
 if debug:
     print("Debug mode")
-    from keras.models import load_model
-    from keras.utils.generic_utils import CustomObjectScope
+if integer_test:    
     import keras
     import tensorflow as tf
+    from keras.models import load_model
+    from keras.utils.generic_utils import CustomObjectScope
     import pathlib
     import numpy as np
     from cnn_convertor import debug_keras
