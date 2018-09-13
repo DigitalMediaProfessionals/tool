@@ -23,9 +23,10 @@ def parse_network(
     network_def: str,
     network_data: str,
     network_type: str,
-    custom_layer: list
+    custom_layer: list,
+    dim_override: tuple
 ) -> cnn_layer.Network:
-    network = cnn_layer.Network(custom_layer)
+    network = cnn_layer.Network(custom_layer, dim_override)
 
     logging.info('Start parsing. Network type:' + network_type)
     if network_type == 'CAFFE':

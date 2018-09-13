@@ -33,8 +33,11 @@ from cnn_convertor import cnn_parser, fpga_layer
 
 
 # Handle parameters
-parser = argparse.ArgumentParser(description="DNN to FPGA convertor")
+parser = argparse.ArgumentParser(
+    description="DNN to FPGA convertor",
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("INPUT_INI", type=str, help="Input ini file")
+
 parser.add_argument("--debug", type=bool, default=0, help="Split Keras network for debugging")
 parser.add_argument("--input_file", type=str, help="Input image for network debugging")
 parser.add_argument("--integer_test", type=bool, default=0, help="Input image for network debugging")
@@ -45,6 +48,15 @@ parser.add_argument("--b_offs", type=float, default=0, help="B offset for debug"
 parser.add_argument("--scale", type=float, default=1, help="scale for debug")
 parser.add_argument("--transpose", type=bool, default=1, help="transpose on/off")
 	
+parser.add_argument("--max_fc_vector_size", type=int, default=16384,
+                    help="Maimum supported input vector size for "
+                    "Fully Connected layer")
+parser.add_argument("--max_kernel_size", type=int, default=7,
+                    help="Maximum supported kernel size for "
+                    "Convolutional Layer")
+parser.add_argument("--ub_size", type=int, default=655360,
+                    help="Unified Buffer Size in bytes")
+
 args = parser.parse_args()
 debug=args.debug
 integer_test=args.integer_test or None
@@ -60,10 +72,20 @@ if integer_test:
     import numpy as np
     from cnn_convertor import debug_keras
 
-    # parse config file
+
+# Set limits
+fpga_layer.set_max_fc_vector_size(args.max_fc_vector_size)
+fpga_layer.set_max_kernel_size(args.max_kernel_size)
+fpga_layer.set_ub_size(args.ub_size)
+
+
+# Parse config file
+
 config = configparser.ConfigParser(strict=False,
                                    inline_comment_prefixes=('#', ';'))
-config.read_dict({'INPUT': {'custom_layer': ''},
+config.read_dict({'INPUT': {'custom_layer': '',
+                            'width_override': -1,
+                            'height_override': -1},
                   'OUTPUT': {'generate_source': 0,
                              'generate_doxy': 0,
                              'generate_dot': 0,
@@ -110,6 +132,8 @@ try:
         network_data = network_def
     network_type = config['INPUT']['origin']
     custom_layer = config['INPUT']['custom_layer']
+    width_override = config.getint('INPUT', 'width_override')
+    height_override = config.getint('INPUT', 'height_override')
     output_folder = config['OUTPUT']['output_folder']
     output_gensource = config.getboolean('OUTPUT', 'generate_source')
     output_gendoc = config.getboolean('OUTPUT', 'generate_doxy')
@@ -121,7 +145,7 @@ except:
     print("Error parsing config file.")
     sys.exit(-1)
 
-# set log levels
+# Set log levels
 root = logging.getLogger()
 for handler in root.handlers[:]:
     root.removeHandler(handler)
@@ -145,20 +169,24 @@ if custom_layer != '':
     custom_layer = custom_module.custom_layer
 else:
     custom_layer = {}
+if width_override != -1 and height_override != -1:
+    dim_override = (width_override, height_override)
+else:
+    dim_override = None
 if not os.path.exists(network_def) or not os.path.exists(network_data):
     logging.error("The input network specified does not exist.")
 network_type = network_type.upper()
-# strip double quotes
+# Strip double quotes
 if output_folder[0] == '"':
     output_folder = output_folder[1:-1]
 output_folder = os.path.abspath(os.path.join(absdir, output_folder))
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
-# parse network
 
+# Parse network
 network = cnn_parser.parse_network(network_def, network_data, network_type,
-                                   custom_layer)
+                                   custom_layer, dim_override)
 fpga_net = fpga_layer.FPGANetwork(network, output_quantization)
 
 if debug:
