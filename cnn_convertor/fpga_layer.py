@@ -24,8 +24,36 @@ from enum import IntEnum, auto
 
 
 MAX_RUN = 32
+MAX_FC_VECTOR_SIZE = 16384
+MAX_KERNEL_SIZE = 7
 MAX_UNIFIED_BUFFER_SIZE = 640 * 1024  # 640KB
 MEM_ALIGN = 128 // 8  # 128bit
+
+
+def check_memalign():
+    n = MEM_ALIGN
+    assert n > 0
+    while (n & 1) == 0:
+        n >>= 1
+    assert n == 1
+
+
+check_memalign()
+
+
+def set_max_fc_vector_size(n):
+    global MAX_FC_VECTOR_SIZE
+    MAX_FC_VECTOR_SIZE = n
+
+
+def set_max_kernel_size(n):
+    global MAX_KERNEL_SIZE
+    MAX_KERNEL_SIZE = n
+
+
+def set_ub_size(n):
+    global MAX_UNIFIED_BUFFER_SIZE
+    MAX_UNIFIED_BUFFER_SIZE = n
 
 
 def get_actfunc(tpe):
@@ -359,8 +387,8 @@ def gen_header_header(of, name, custom_layer_config):
              ' *  See the License for the specific language governing permissions and\n'
              ' *  limitations under the License.\n\n'
              ' *  This source code was generated using DMP-DV700 tools.\n'
-             ' */\n\n'
-             '#pragma once\n'
+             ' */\n'
+             '#pragma once\n\n'
              '#include "dmp_network.h"\n\n')
     for custom_type, custom_config in custom_layer_config.items():
         of.write('struct custom_param_{0}'.format(custom_type))
@@ -413,13 +441,9 @@ def gen_header_layer(of, n, layer, quantization):
 def gen_header_footer(of, name):
     of.write('\n'
              ' public:\n'
-             '  unsigned int get_total_layer_count();\n'
-             '  unsigned int get_output_layer_count();\n'
-             '  unsigned int get_convolution_layer_count();\n'
-             '  unsigned int get_innerproduct_layer_count();\n'
-             '  int initialize();\n')
+             '  virtual bool Initialize();\n')
     of.write('  C{0}();\n'.format(name))
-    of.write('  ~C{0}();\n'.format(name))
+    of.write('  virtual ~C{0}();\n'.format(name))
     of.write('};\n')
 
 
@@ -438,99 +462,74 @@ def gen_source_header(of, name, net):
              ' *  This source code was generated using DMP-DV700 tools.\n'
              ' */\n\n')
     of.write('#include "{0}_gen.h"\n'.format(name))
-    of.write('\n')
-    of.write('C{0}::C{0}() '.format(name))
-    of.write('{}\n\n')
-    of.write('C{0}::~C{0}() '.format(name))
-    of.write('{}\n\n')
-    of.write('unsigned int C{0}::get_total_layer_count() '.format(name))
-    of.write('{\n'
-             '  return num_layers;\n'
-             '}\n\n')
-    of.write('unsigned int C{0}::get_output_layer_count() '.format(name))
-    of.write('{\n'
-             '  return num_output_layers;\n'
-             '}\n\n')
-    of.write('unsigned int C{0}::get_convolution_layer_count() '.format(name))
-    of.write('{\n'
-             '  return num_conv_layers;\n'
-             '}\n\n')
-    of.write('unsigned int C{0}::get_innerproduct_layer_count() '.format(name))
-    of.write('{\n'
-             '  return num_fc_layers;\n'
-             '}\n\n')
-    of.write('int C{0}::initialize() '.format(name))
+    of.write('\n\n')
+    of.write('C{0}::C{0}() {{\n'.format(name))
+    of.write('  // Empty by design\n}\n\n')
+    of.write('C{0}::~C{0}() {{\n'.format(name))
+    of.write('  // Empty by design\n}\n\n')
+    of.write('bool C{0}::Initialize() '.format(name))
     of.write('{\n')
-    of.write('  num_layers = {0};\n'.format(len(net.layer)))
-    of.write('  num_output_layers = {0};\n'.format(net.num_output_layers))
-    of.write('  num_conv_layers = {0};\n'.format(net.num_conv_layers))
-    of.write('  num_fc_layers = {0};\n'.format(net.num_fc_layers))
-    of.write('  weight_size = {0};\n'.format(net.weight_size))
-    of.write('  buffer_size = {0};\n'.format(net.buffer_size))
-    of.write('  layers.resize(num_layers);\n'
-             '  output_layers.resize(num_output_layers);\n'
-             '  conv_layers.resize(num_conv_layers);\n'
-             '  fc_layers.resize(num_fc_layers);\n'
-             '  memory_size_request.resize(2);\n\n'
-             '  //set_default_convolution_layers_parameters();\n')
+    of.write('  if (!ReserveMemory({0}, {1})) {{\n'.format(
+        net.weight_size, net.buffer_size))
+    of.write('    return false;\n')
+    of.write('  }\n\n')
+    of.write('  set_num_layers({0});\n'.format(len(net.layer)))
+    of.write('  set_num_output_layers({0});\n\n'.format(net.num_output_layers))
     for n in range(len(net.layer)):
         of.write('  Layer_{0}();\n'.format(n))
-    of.write('\n'
-             '  //Add 2 memory size requests. One for weights, the other for io buffers\n'
-             '  memory_size_request[0] = weight_size;\n'
-             '  memory_size_request[1] = buffer_size;\n\n'
-             '  return 0;\n'
-             '}\n\n')
+    of.write('\n  return true;\n}\n\n')
 
 
 def gen_source_conv(of, name, n, layer, quantization):
     global weight_offset
-    global conv_index
     global is_tensorflow
     of.write('//Layer_{0}: Convolution Layer\n'.format(n))
+    layer_names = []
     for run in layer.run:
         if run.conv is not None:
             of.write('//  ->: {0}\n'.format(run.conv.name))
+            layer_names.append(run.conv.name)
             if run.conv.bn_node:
                 of.write('//  ->: {0}\n'.format(run.conv.bn_node.name))
+                layer_names.append(run.conv.bn_node.name)
             if run.conv.sc_node:
                 of.write('//  ->: {0}\n'.format(run.conv.sc_node.name))
+                layer_names.append(run.conv.sc_node.name)
             if run.conv.act_node:
                 of.write('//  ->: {0}\n'.format(run.conv.act_node.name))
+                layer_names.append(run.conv.act_node.name)
         if run.pool is not None:
             of.write('//  ->: {0}\n'.format(run.pool.name))
+            layer_names.append(run.pool.name)
     of.write('void C{0}::Layer_{1}() '.format(name, n))
     of.write('{\n')
-    of.write('  struct top_conv_conf& _conf = get_conv_layer({0});\n'.format(conv_index))
-    of.write('  //Topo: {0:032b}\n'.format(layer.topo))
-    of.write('  _conf.hw.header.topo = 0x{0:X}; // [31:0] Output Destination of each run, 0 = UBUF, 1 = EXTMEM\n\n'.format(layer.topo))
-    of.write('  //Input Configuration:\n')
-    of.write('  _conf.hw.input.w = {0}; // Input Width\n'.format(layer.node_in.input_dim[0]))
-    of.write('  _conf.hw.input.h = {0}; // Input Height\n'.format(layer.node_in.input_dim[1]))
-    of.write('  _conf.hw.input.z = 1; // Input Depth\n')
-    of.write('  _conf.hw.input.c = {0}; // Input Channels\n'.format(layer.node_in.input_dim[2]))
-    of.write('  _conf.hw.input.input_base_addr = 0x{0:08X}; // Input byte address\n'.format(layer.layer_in[0].output_addr_offset))
-    of.write('  _conf.hw.input.tiles = {0}; // Number of horizontal tiles (supported with restrictions)\n\n'.format(layer.tiles))
-    of.write('  //Output Configuration:\n')
-    if len(layer.node_out.output_dim) == 3:
-        of.write('  _conf.sw.output.w = {0}; // Output Width\n'.format(layer.node_out.output_dim[0]))
-        of.write('  _conf.sw.output.h = {0}; // Output Height\n'.format(layer.node_out.output_dim[1]))
-        of.write('  _conf.sw.output.z = 1; // Output Depth\n')
-        of.write('  _conf.sw.output.m = {0}; // Output Channels\n'.format(layer.node_out.output_dim[2]))
-    else:
-        of.write('  _conf.sw.output.w = 1; // Output Width\n')
-        of.write('  _conf.sw.output.h = 1; // Output Height\n')
-        of.write('  _conf.sw.output.z = 1; // Output Depth\n')
-        of.write('  _conf.sw.output.m = {0}; // Output Channels\n'.format(layer.node_out.output_dim[0]))
-    of.write('  _conf.hw.output.output_base_addr = 0x{0:08X}; // Output byte address\n'.format(layer.output_addr_offset))
+    of.write('  get_layer({0}).name = "{1}";\n'.format(n, ", ".join(layer_names)))
+    of.write('  dmp_dv_cmdraw_conv_v0& conf = get_layer({0}).conv_conf;\n'.format(n))
+    of.write('  conf.header.size = sizeof(conf);\n')
+    of.write('  conf.header.device_type = DMP_DV_DEV_CONV;\n')
+    of.write('  conf.header.version = 0;\n')
+    of.write('  // Topo: {0:032b}\n'.format(layer.topo))
+    of.write('  conf.topo = 0x{0:X};  // [31:0] Output Destination of each run, 0 = UBUF, 1 = EXTMEM\n\n'.format(layer.topo))
+    of.write('  // Input Configuration:\n')
+    of.write('  conf.w = {0};  // Input Width\n'.format(layer.node_in.input_dim[0]))
+    of.write('  conf.h = {0};  // Input Height\n'.format(layer.node_in.input_dim[1]))
+    of.write('  conf.z = 1;  // Input Depth\n')
+    of.write('  conf.c = {0};  // Input Channels\n'.format(layer.node_in.input_dim[2]))
+    of.write('  conf.input_buf.mem = io_mem_;\n'
+             '  conf.input_buf.offs = {0};\n\n'.format(layer.layer_in[0].output_addr_offset))
+    of.write('  // Output Configuration:\n')
+    of.write('  conf.output_buf.mem = io_mem_;\n'
+             '  conf.output_buf.offs = {0};\n\n'.format(layer.output_addr_offset))
     if layer.run[0].pool and layer.run[0].pool.type is NodeType.Eltwise:
-        of.write('  _conf.hw.output.eltwise_base_addr = 0x{0:08X}; // Input byte address for elementwise add (0 = UBUF Input Buffer)\n'
-                 '  _conf.hw.output.output_mode = 1; // 0 = concat, 1 = eltwise add\n\n'.format(layer.layer_in[1].output_addr_offset))
+        of.write('  conf.eltwise_buf.mem = io_mem_;\n'
+                 '  conf.eltwise_buf.offs = {0};  // Input byte address for elementwise add (0 = UBUF Input Buffer)\n'
+                 '  conf.output_mode = 1;  // 0 = concat, 1 = eltwise add\n\n'.format(layer.layer_in[1].output_addr_offset))
     else:
-        of.write('  _conf.hw.output.eltwise_base_addr = 0xDEADBEEF; // Input byte address for elementwise add (0 = UBUF Input Buffer)\n'
-                 '  _conf.hw.output.output_mode = 0; // 0 = concat, 1 = eltwise add\n\n')
-    of.write('  //Runs Configuration:\n')
-    of.write('  //->{0} run(s)\n'.format(len(layer.run)))
+        of.write('  conf.eltwise_buf.mem = NULL;\n'
+                 '  conf.eltwise_buf.offs = 0;  // Input byte address for elementwise add (0 = UBUF Input Buffer)\n'
+                 '  conf.output_mode = 0;  // 0 = concat, 1 = eltwise add\n\n')
+    of.write('  // Runs Configuration:\n')
+    of.write('  // ->{0} run(s)\n'.format(len(layer.run)))
     for i, run in enumerate(layer.run):
         is_conv = run.conv is not None and run.conv.type is NodeType.Convolution
         is_lrn = run.conv is not None and run.conv.type is NodeType.LRN
@@ -560,8 +559,7 @@ def gen_source_conv(of, name, n, layer, quantization):
             node_in = run.conv
             if node_in.act_node:
                 actfunc = get_actfunc(node_in.act_node.type)
-                actparam = np.float16(node_in.act_node.param.relu_param)
-                actparam = actparam.data[1] << 8 | actparam.data[0]
+                actparam = np.float16(node_in.act_node.param.relu_param).view(np.uint16)
         node_out = run.conv
         if run.pool is not None:
             node_out = run.pool
@@ -607,38 +605,30 @@ def gen_source_conv(of, name, n, layer, quantization):
                 of.write('  //->: {0}\n'.format(run.conv.act_node.name))
         if run.pool is not None:
             of.write('  //->: {0}\n'.format(run.pool.name))
-        of.write('  _conf.sw.run[{0}].in_w = {1}; // Optional: Input width (not used by HW - discovered on the fly)\n'.format(i, node_in.input_dim[0]))
-        of.write('  _conf.sw.run[{0}].in_h = {1}; // Optional: Input height (not used by HW - discovered on the fly)\n'.format(i, node_in.input_dim[1]))
-        of.write('  _conf.sw.run[{0}].in_c = {1}; // Optional: Input Channels (not used by HW - discovered on the fly)\n'.format(i, node_in.input_dim[2]))
-        of.write('  _conf.sw.run[{0}].out_w = {1}; // Optional: Output width (not used by HW - discovered on the fly)\n'.format(i, node_out.output_dim[0]))
-        of.write('  _conf.sw.run[{0}].out_h = {1}; // Optional: Output height (not used by HW - discovered on the fly)\n'.format(i, node_out.output_dim[1]))
-        of.write('  _conf.hw.run[{0}].m = {1}; // Output Channels\n'.format(i, m))
-        of.write('  _conf.hw.run[{0}].conv_enable = {1}; // 1 = Enabled, 0 = Disabled\n'.format(i, conv_enable))
-        of.write('  _conf.hw.run[{0}].p = {1}; // Filter Width and Height\n'.format(i, p))
-        of.write('  _conf.hw.run[{0}].pz = 1; // Filter Depth\n'.format(i))
-        of.write('  _conf.hw.run[{0}].weight_base_addr = 0x{1:08X}; // Filter Weight and Bias byte address\n'.format(i, weight_offset))
-        of.write('  _conf.hw.run[{0}].weight_fmt = {1}; // Weight format (0 = random access blocks, 1 = compact stream, 3 = 8-bit qunatized stream)\n'.format(i, ((3 if quantization else 1) if is_conv else 0)))
-        of.write('  _conf.sw.run[{0}].weight_size = {1}; // Actual size in bytes of LUT, weights and bias (in bytes)\n'.format(i, get_weight_size(run.conv, quantization)))
-        of.write('  _conf.hw.run[{0}].conv_pad = 0x{1:X}; // bits [7:0] = left padding, bits [15:8] = right padding, bits [23:16] = top padding, bits [31:24] = bottom padding\n'.format(i, conv_pad))
-        of.write('  _conf.hw.run[{0}].conv_stride = 0x{1:X}; // bits [7:0] = X stride, bits [15:8] = Y stride\n'.format(i, conv_stride))
-        of.write('  _conf.hw.run[{0}].conv_dilation = 0x0; // bits [7:0] = X dilation, bits [15:8] = Y dilation\n'.format(i))
-        of.write('  _conf.hw.run[{0}].pool_enable = {1};  // 0 = disabled, 1 = max pooling, 2 = average pooling\n'.format(i, pool_enable))
-        of.write('  _conf.hw.run[{0}].pool_size = 0x{1:X}; // bits [7:0] = width, bits [15:8] = height\n'.format(i, pool_size))
-        of.write('  _conf.hw.run[{0}].pool_stride = 0x{1:X}; // bits [7:0] = X stride, bits [15:8] = Y stride\n'.format(i, pool_stride))
-        of.write('  _conf.hw.run[{0}].pool_pad = 0x{1:X}; // bits [7:0] = left padding, bits [15:8] = right padding, bits [23:16] = top padding, bits [31:24] = bottom padding\n'.format(i, pool_pad))
-        of.write('  _conf.hw.run[{0}].pool_avg_param = 0x{1:X}; // Must be set to 1/pool_size^2 in FP16 format when using average pooling (average pooling assumes square size)\n'.format(i, pool_avg_param))
-        of.write('  _conf.hw.run[{0}].actfunc = {1}; // Activation Function: 0 = None, 1 = Tanh, 2 = Leaky ReLU, 3 = Sigmoid, 4 = PReLU, 5 = ELU, 6 = ReLU6\n'.format(i, actfunc))
-        of.write('  _conf.hw.run[{0}].actfunc_param = 0x{1:X}; // Leaky ReLU parameter (NOTE: 0x2E66 is 0.1 in FP16)\n'.format(i, actparam))
-        of.write('  _conf.hw.run[{0}].rectifi_en = 0; // Rectification, i.e. max(0, x) (NOTE: Can be applied after non-ReLU activation function)\n'.format(i))
-        of.write('  _conf.hw.run[{0}].lrn= 0x{1:X}; // [0] : 1 = LRN enable, 0 = LRN disable, [1] : 1 = incl. power func, 0 = excl., [8:11] = x^2 scale factor log2\n'.format(i, (1027 if is_lrn else 0)))
-        of.write('  _conf.hw.run[{0}].ALIGN_0 = 0;//Some comments needed here\n'.format(i))
+        of.write('  conf.run[{0}].m = {1};  // Output Channels\n'.format(i, m))
+        of.write('  conf.run[{0}].conv_enable = {1};  // 1 = Enabled, 0 = Disabled\n'.format(i, conv_enable))
+        of.write('  conf.run[{0}].p = {1};  // Filter Width and Height\n'.format(i, p))
+        of.write('  conf.run[{0}].pz = 1;  // Filter Depth\n'.format(i))
+        of.write('  conf.run[{0}].weight_buf.mem = weights_mem_;\n'
+                 '  conf.run[{0}].weight_buf.offs = {1};\n'.format(i, weight_offset))
+        of.write('  conf.run[{0}].weight_fmt = {1};  // Weight format (0 = random access blocks, 1 = compact stream, 3 = 8-bit qunatized stream)\n'.format(i, ((3 if quantization else 1) if is_conv else 0)))
+        of.write('  conf.run[{0}].conv_pad = 0x{1:X};  // bits [7:0] = left padding, bits [15:8] = right padding, bits [23:16] = top padding, bits [31:24] = bottom padding\n'.format(i, conv_pad))
+        of.write('  conf.run[{0}].conv_stride = 0x{1:X};  // bits [7:0] = X stride, bits [15:8] = Y stride\n'.format(i, conv_stride))
+        of.write('  conf.run[{0}].conv_dilation = 0x0;  // bits [7:0] = X dilation, bits [15:8] = Y dilation\n'.format(i))
+        of.write('  conf.run[{0}].pool_enable = {1};  // 0 = disabled, 1 = max pooling, 2 = average pooling\n'.format(i, pool_enable))
+        of.write('  conf.run[{0}].pool_size = 0x{1:X};  // bits [7:0] = width, bits [15:8] = height\n'.format(i, pool_size))
+        of.write('  conf.run[{0}].pool_stride = 0x{1:X};  // bits [7:0] = X stride, bits [15:8] = Y stride\n'.format(i, pool_stride))
+        of.write('  conf.run[{0}].pool_pad = 0x{1:X};  // bits [7:0] = left padding, bits [15:8] = right padding, bits [23:16] = top padding, bits [31:24] = bottom padding\n'.format(i, pool_pad))
+        of.write('  conf.run[{0}].pool_avg_param = 0x{1:X};  // Must be set to 1/pool_size^2 in FP16 format when using average pooling (average pooling assumes square size)\n'.format(i, pool_avg_param))
+        of.write('  conf.run[{0}].actfunc = {1};  // Activation Function: 0 = None, 1 = Tanh, 2 = Leaky ReLU, 3 = Sigmoid, 4 = PReLU, 5 = ELU, 6 = ReLU6\n'.format(i, actfunc))
+        of.write('  conf.run[{0}].actfunc_param = 0x{1:X};  // Leaky ReLU parameter (NOTE: 0x2E66 is 0.1 in FP16)\n'.format(i, actparam))
+        of.write('  conf.run[{0}].rectifi_en = 0;  // Rectification, i.e. max(0, x) (NOTE: Can be applied after non-ReLU activation function)\n'.format(i))
+        of.write('  conf.run[{0}].lrn = 0x{1:X};  // [0] : 1 = LRN enable, 0 = LRN disable, [1] : 1 = incl. power func, 0 = excl., [8:11] = x^2 scale factor log2\n'.format(i, (0x503 if is_lrn else 0)))
         weight_offset += get_weight_size(run.conv, quantization)
-    conv_index += 1
 
 
 def gen_source_fc(of, name, n, layer):
     global weight_offset
-    global fc_index
     node = layer.node_in
     if len(node.input_dim) == 3:
         w, h, c = node.input_dim
@@ -657,26 +647,27 @@ def gen_source_fc(of, name, n, layer):
                 actparam = actparam.data[1] << 8 | actparam.data[0]
         else:
             actfunc = 0x20
-    of.write('//Layer_{0}: Fully Connected Layer\n'.format(n))
+    of.write('// Layer_{0}: Fully Connected Layer\n'.format(n))
     of.write('//	->: {0}\n'.format(node.name))
     of.write('void C{0}::Layer_{1}() '.format(name, n))
     of.write('{\n')
-    of.write('  struct top_fc_conf& cf = get_ip_layer({0});\n'.format(fc_index))
-    of.write('  cf.hw.input_size = {0};\n'.format(w * h * c))
-    of.write('  cf.hw.output_size = {0};\n'.format(m))
-    of.write('  cf.sw.total_size = {0}; //from tool // Actual size in bytes of LUT, weights and bias (in bytes)\n'.format(size))
-    of.write('  cf.hw.stride = cf.hw.input_size;\n'
-             '  cf.hw.bias_size = 2 * cf.hw.output_size; // bias size (in bytes) = 2 times the output size\n')
-    of.write('  cf.hw.param_base_addr = 0x{0:08X}; //base address\n'.format(weight_offset))
-    of.write('  cf.hw.weight_addr = 0x{0:08X}; //weight address = param_base_addr + 2*256 (lut size/float16/2bytes)\n'.format(weight_offset + 2 * 256))
-    of.write('  cf.hw.bias_addr = 0x{0:08X}; //bias address =  weight_addr + stride*input size\n'.format(weight_offset + 2 * 256 + w * h * c * m))
-    of.write('  cf.hw.input_base_addr = 0x{0:08X};\n'.format(layer.layer_in[0].output_addr_offset))
-    of.write('  cf.hw.output_base_addr = 0x{0:08X};\n'.format(layer.output_addr_offset))
-    of.write('  cf.hw.param_fmt = 1; // 0 = unquantized weight matrix, 1 = qunatized\n')
-    of.write('  cf.hw.actfunc = 0x{0:X}; // Activation Function: 0 = None, 1 = Tanh, 2 = Leaky ReLU, 3 = Sigmoid, 4 = PReLU, 5 = ELU, 6 = ReLU6\n'.format(actfunc))
-    of.write('  cf.hw.actfunc_param = 0x{0:X}; // Leaky ReLU parameter (in FP16 format), 0 = non-leaky\n'.format(actparam))
+    of.write('  get_layer({0}).name = "{1}";\n'.format(n, node.name))
+    of.write('  dmp_dv_cmdraw_fc_v0& conf = get_layer({0}).fc_conf;\n'.format(n))
+    of.write('  conf.header.size = sizeof(conf);\n')
+    of.write('  conf.header.version = 0;\n')
+    of.write('  conf.header.device_type = DMP_DV_DEV_FC;\n')
+    of.write('  conf.input_size = {0};\n'.format(w * h * c))
+    of.write('  conf.output_size = {0};\n'.format(m))
+    of.write('  conf.weight_buf.mem = weights_mem_;\n'
+             '  conf.weight_buf.offs = {0};\n'.format(weight_offset))
+    of.write('  conf.input_buf.mem = io_mem_;\n'
+             '  conf.input_buf.offs = {0};\n'.format(layer.layer_in[0].output_addr_offset))
+    of.write('  conf.output_buf.mem = io_mem_;\n'
+             '  conf.output_buf.offs = {0};\n'.format(layer.output_addr_offset))
+    of.write('  conf.weight_fmt = 1;  // 0 = unquantized weight matrix, 1 = qunatized\n')
+    of.write('  conf.actfunc = 0x{0:X};  // Activation Function: 0 = None, 1 = Tanh, 2 = Leaky ReLU, 3 = Sigmoid, 4 = PReLU, 5 = ELU, 6 = ReLU6\n'.format(actfunc))
+    of.write('  conf.actfunc_param = 0x{0:X};  // Leaky ReLU parameter (in FP16 format), 0 = non-leaky\n'.format(actparam))
     weight_offset += size
-    fc_index += 1
 
 
 def gen_source_layer(of, name, n, layer, quantization):
@@ -735,19 +726,11 @@ def gen_source_layer(of, name, n, layer, quantization):
             of.write('    &layers[{0}],\n'.format(layer_in.index))
         of.write('  };\n\n')
 
-    of.write('  struct fpga_layer& layer = layers[{0}];\n'.format(n))
+    of.write('  fpga_layer& layer = get_layer({0});\n'.format(n))
     of.write('  layer.type = {0};\n'.format(type_map[layer.type]))
-    if layer.type is LayerType.Convolution:
-        of.write('  layer.hw_conf = (void*)&_conf;\n')
-    elif layer.type is LayerType.InnerProduct:
-        of.write('  layer.hw_conf = (void*)&cf;\n')
-    else:
-        of.write('  layer.hw_conf = (void*)0;\n')
-    of.write('  layer.addr_cpu_input = 0x0;\n')
-    of.write('  layer.addr_cpu_output = 0x0;\n')
-    of.write('  layer.addr_offset_input = 0x{:08X};\n'.format(
+    of.write('  layer.input_offs = {0};\n'.format(
         layer.layer_in[0].output_addr_offset))
-    of.write('  layer.addr_offset_output = 0x{:08X};\n'.format(
+    of.write('  layer.output_offs = {0};\n'.format(
         layer.output_addr_offset))
     of.write('  layer.output_size = {0};\n'.format(
         layer.node_out.output_size))
@@ -777,7 +760,7 @@ def gen_source_layer(of, name, n, layer, quantization):
         of.write('  layer.input_layer_num = {0};\n'.format(len(layer.layer_in)))
         of.write('  layer.input_layers = input_layers;\n')
     if layer.is_output:
-        of.write('  output_layers[{0}] = &layer;\n'.format(output_index))
+        of.write('  output_layers_[{0}] = &layer;\n'.format(output_index))
         output_index += 1
     of.write('}}//end of  Layer_{0}\n\n'.format(n))
 
@@ -1208,13 +1191,9 @@ class FPGANetwork(object):
     def output_source(self, of, name) -> None:
         global weight_offset
         global output_index
-        global conv_index
-        global fc_index
         global is_tensorflow
         weight_offset = 0
         output_index = 0
-        conv_index = 0
-        fc_index = 0
         is_tensorflow = self.tensorflow_backend
         gen_source_header(of, name, self)
         for n, layer in enumerate(self.layer):

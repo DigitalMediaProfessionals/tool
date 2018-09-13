@@ -175,13 +175,14 @@ class Network(object):
     """Represents a CNN.
     """
 
-    def __init__(self, custom_layer) -> None:
+    def __init__(self, custom_layer, dim_override) -> None:
         """Construct an empty CNN.
         """
         self.input_nodes = []
         self.output_node = None
         self.debug_node = None
         self.custom_layer = custom_layer
+        self.dim_override = dim_override
         self.tensorflow_backend = False
 
     def build_traverse_list(self) -> None:
@@ -311,6 +312,14 @@ class Network(object):
                 w = math.floor(w)
                 h = math.floor(h)
             return w, h
+
+        # Override input dimension if dim_override is given
+        if self.dim_override:
+            dim = self.dim_override
+            for node in self.input_nodes:
+                new_dim = (dim[0], dim[1], node.input_dim[2])
+                node.set_input_dim(new_dim)
+                node.set_output_dim(new_dim)
 
         tr_list = self.traverse_list[:]
         for node in tr_list:
