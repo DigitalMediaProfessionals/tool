@@ -48,6 +48,7 @@ parser.add_argument("--b_offs", type=float, default=0, help="B offset for debug"
 parser.add_argument("--scale", type=float, default=1, help="scale for debug")
 parser.add_argument("--transpose", type=bool, default=1, help="transpose on/off")
 	
+
 parser.add_argument("--max_fc_vector_size", type=int, default=16384,
                     help="Maimum supported input vector size for "
                     "Fully Connected layer")
@@ -71,6 +72,13 @@ if integer_test:
     from keras.utils.generic_utils import CustomObjectScope
     import pathlib
     import numpy as np
+
+
+
+# Set limits
+fpga_layer.set_max_fc_vector_size(args.max_fc_vector_size)
+fpga_layer.set_max_kernel_size(args.max_kernel_size)
+fpga_layer.set_ub_size(args.ub_size)
 
 
 
@@ -183,7 +191,6 @@ if output_folder[0] == '"':
 output_folder = os.path.abspath(os.path.join(absdir, output_folder))
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
-
 
 # Parse network
 network = cnn_parser.parse_network(network_def, network_data, network_type,

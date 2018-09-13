@@ -21,8 +21,6 @@ import h5py
 import json
 import numpy as np
 
-
-
 NodeType = cnn_layer.NodeType
 padding = (0, 0)
 
@@ -41,6 +39,10 @@ def set_inplace_node(node, config):
         node_type = NodeType.ReLU
     elif activation == 'tanh':
         node_type = NodeType.TanH
+    elif activation == 'sigmoid':
+        node_type = NodeType.Sigmoid
+    elif activation == 'elu':
+        node_type = NodeType.ELU
     elif activation == 'softmax':
         node_type = NodeType.SoftMax
         input_node = node
@@ -165,6 +167,10 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     node_type = NodeType.ReLU
                 elif activation == 'tanh':
                     node_type = NodeType.TanH
+                elif activation == 'sigmoid':
+                    node_type = NodeType.Sigmoid
+                elif activation == "elu":
+                    node_type = NodeType.ELU
                 node = cnn_layer.LayerNode(layer_name, node_type)
                 up_node.set_activation_node(node)
                 top_map[layer_name] = up_node
