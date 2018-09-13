@@ -63,6 +63,7 @@ integer_test=args.integer_test or None
 
 if debug:
     print("Debug mode")
+    from cnn_convertor import debug_keras
 if integer_test:    
     import keras
     import tensorflow as tf
@@ -70,7 +71,7 @@ if integer_test:
     from keras.utils.generic_utils import CustomObjectScope
     import pathlib
     import numpy as np
-    from cnn_convertor import debug_keras
+
 
 
 # Set limits
