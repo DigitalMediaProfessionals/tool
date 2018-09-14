@@ -316,13 +316,18 @@ def pack_weight(node, of, quantization):
                                          kernel_size[0])
 
 
-def pack_fc_weight(node, conv_node, of):
+def pack_fc_weight(node, conv_node, of, quantization):
     logging.info('Packing FC weight for node: %s.', node.name)
-    centers, labels = calc_kmeans(node.weight)
-    index8 = labels.astype(np.uint8)
+
+    if quantization:
+        centers, labels = calc_kmeans(node.weight)
+        labels = labels.astype(np.uint8)
+    else:
+        labels = node.weight.astype(np.float16)
     bias16 = node.bias.astype(np.float16)
 
-    centers.tofile(of)
+    if quantization:
+        centers.tofile(of)
     if conv_node is not None:
         if len(conv_node.output_dim) == 3:
             w, h, c = conv_node.output_dim
@@ -331,13 +336,13 @@ def pack_fc_weight(node, conv_node, of):
         m = node.param.num_output
         if w != 1 or h != 1:
             logging.info('Reordering FC weight for node: %s.', node.name)
-            index8.shape = (m, c, h, w)
+            labels.shape = (m, c, h, w)
             for n in range(m):
                 for d in range(0, c, 8):
                     e = d + 8 if d + 8 < c else c
-                    tr_index8 = index8[n, d:e, :, :].transpose(2, 1, 0)
-                    index8[n, d:e, :, :] = tr_index8.reshape(e - d, h, w)
-    index8.tofile(of)
+                    tr_index8 = labels[n, d:e, :, :].transpose(2, 1, 0)
+                    labels[n, d:e, :, :] = tr_index8.reshape(e - d, h, w)
+    labels.tofile(of)
     bias16.tofile(of)
 
 
@@ -627,7 +632,7 @@ def gen_source_conv(of, name, n, layer, quantization):
         weight_offset += get_weight_size(run.conv, quantization)
 
 
-def gen_source_fc(of, name, n, layer):
+def gen_source_fc(of, name, n, layer, quantization):
     global weight_offset
     node = layer.node_in
     if len(node.input_dim) == 3:
@@ -667,7 +672,7 @@ def gen_source_fc(of, name, n, layer):
              '  conf.input_buf.offs = {0};\n'.format(layer.layer_in[0].output_addr_offset))
     of.write('  conf.output_buf.mem = io_mem_;\n'
              '  conf.output_buf.offs = {0};\n'.format(layer.output_addr_offset))
-    of.write('  conf.weight_fmt = 1;  // 0 = unquantized weight matrix, 1 = qunatized\n')
+    of.write('  conf.weight_fmt = {0};  // 0 = unquantized weight matrix, 1 = qunatized\n'.format((1 if quantization else 0)))
     of.write('  conf.actfunc = {0};  // Activation Function: 0 = None, 1 = ReLU, 2 = Tanh, 3 = Leaky ReLU, 4 = Sigmoid, 5 = PReLU (PReLU must be used with POST-OP=1)\n'.format(actfunc))
     of.write('  conf.actfunc_param = 0x{0:X};  // Leaky ReLU parameter (in FP16 format), 0 = non-leaky\n'.format(actparam))
     weight_offset += size
@@ -688,7 +693,7 @@ def gen_source_layer(of, name, n, layer, quantization):
         gen_source_conv(of, name, n, layer, quantization)
         of.write('\n')
     elif layer.type is LayerType.InnerProduct:
-        gen_source_fc(of, name, n, layer)
+        gen_source_fc(of, name, n, layer, quantization)
         of.write('\n')
     else:
         if layer.type is LayerType.Input:
@@ -1213,7 +1218,7 @@ class FPGANetwork(object):
                             run.conv.type is NodeType.Convolution):
                         pack_weight(run.conv, of, self.quantization)
             elif layer.type is LayerType.InnerProduct:
-                pack_fc_weight(layer.node_in, prev_node, of)
+                pack_fc_weight(layer.node_in, prev_node, of, self.quantization)
             prev_node = layer.node_out
 
     def output_network(self, output_folder: str, network_name: str,
