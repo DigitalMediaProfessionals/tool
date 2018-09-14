@@ -726,7 +726,7 @@ def gen_source_layer(of, name, n, layer, quantization):
     elif layer.type is LayerType.CopyConcatenate:
         of.write('  static fpga_layer *input_layers[] = {\n')
         for layer_in in layer.layer_in:
-            of.write('    &layers[{0}],\n'.format(layer_in.index))
+            of.write('    &layers_[{0}],\n'.format(layer_in.index))
         of.write('  };\n\n')
 
     of.write('  fpga_layer& layer = get_layer({0});\n'.format(n))
@@ -843,7 +843,8 @@ class FPGALayer(object):
                 if len(self.run) == 0:
                     need_copy = False
                     if len(node.output_dim) == 3:
-                        for node_in in node.input_nodes:
+                        # ignore the last input node
+                        for node_in in node.input_nodes[:-1]:
                             if node_in.output_dim[2] % 8 != 0:
                                 need_copy = True
                                 break
