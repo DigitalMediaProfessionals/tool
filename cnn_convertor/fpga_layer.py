@@ -369,13 +369,16 @@ def get_weight_size(node, quantization):
     return weight_size
 
 
-def get_fc_weight_size(node):
+def get_fc_weight_size(node, quantization):
     if len(node.input_dim) == 3:
         w, h, c = node.input_dim
     elif len(node.input_dim) == 1:
         w, h, c = 1, 1, node.input_dim[0]
     m = node.output_dim[0]
-    size = w * h * c * m + m * 2 + 512
+    if quantization:
+        size = w * h * c * m + m * 2 + 512
+    else:
+        size = w * h * c * m * 2 + m * 2
     return size
 
 
@@ -640,7 +643,7 @@ def gen_source_fc(of, name, n, layer, quantization):
     elif len(node.input_dim) == 1:
         w, h, c = 1, 1, node.input_dim[0]
     m = node.output_dim[0]
-    size = get_fc_weight_size(node)
+    size = get_fc_weight_size(node, quantization)
     actfunc = 0
     actparam = 0
     if node.act_node:
@@ -1093,7 +1096,7 @@ class FPGANetwork(object):
                     weight_size += get_weight_size(run.conv, self.quantization)
             elif layer.type is LayerType.InnerProduct:
                 self.num_fc_layers += 1
-                weight_size += get_fc_weight_size(layer.node_in)
+                weight_size += get_fc_weight_size(layer.node_in, self.quantization)
             if layer.is_output:
                 self.num_output_layers += 1
                 self.output_layer.append(layer)
