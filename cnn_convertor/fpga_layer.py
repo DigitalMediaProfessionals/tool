@@ -1047,24 +1047,26 @@ class FPGANetwork(object):
             layer = FPGALayer(tl[layer_start_index:index])
             self.layer.append(layer)
 
-        if self.layer[-1].node_out is net.traverse_list[-1]:
-            self.layer[-1].is_output = True
-        else:
-            output_nodes = [net.traverse_list[-1]]
-            i = 0
-            while i < len(output_nodes):
-                node = output_nodes[i]
-                i += 1
-                for node_in in node.input_nodes:
-                    out_node_reached = False
-                    if node_in in converted_node:
-                        for layer in reversed(self.layer):
-                            if layer.node_out is node_in:
-                                out_node_reached = True
-                                layer.is_output = True
-                                break
-                    if not out_node_reached:
-                        output_nodes.append(node_in)
+        # determine output layers
+        output_nodes = net.output_nodes[:]
+        for layer in self.layer:
+            if layer.node_out in output_nodes:
+                layer.is_output = True
+                output_nodes.remove(layer.node_out)
+        i = 0
+        while i < len(output_nodes):
+            node = output_nodes[i]
+            i += 1
+            for node_in in node.input_nodes:
+                out_node_reached = False
+                if node_in in converted_node:
+                    for layer in reversed(self.layer):
+                        if layer.node_out is node_in:
+                            out_node_reached = True
+                            layer.is_output = True
+                            break
+                if not out_node_reached:
+                    output_nodes.append(node_in)
 
         self.connect_layers()
 

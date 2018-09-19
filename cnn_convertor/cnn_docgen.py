@@ -2639,7 +2639,7 @@ def output_page(of, network_name, gengraph, fpga_net):
 
 
 def graph_name(name: str) -> str:
-    return name.replace('/', '_')
+    return name.replace('/', '_').replace('-', '_')
 
 
 def output_graph(of, fpga_net):

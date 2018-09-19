@@ -124,6 +124,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
     top_map = {}
     prev_node = None
     # Handle each layer node
+    parsed_nodes = []
     for i, layer in enumerate(layers):
         layer_type = layer['class_name']
         config = layer['config']
@@ -264,6 +265,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             node_type = type_map[layer_type]
         node = cnn_layer.LayerNode(layer_name, node_type, input_nodes)
         prev_node = node
+        parsed_nodes.append(node)
 
         # add this node to top_map
         if layer_name in top_map:
@@ -380,7 +382,10 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 custom_config[1], layer_type)
             param.custom_param = custom_param
             node.set_param(param)
-    network.set_output_node(prev_node)
+
+    for node in parsed_nodes:
+        if len(node.output_nodes) == 0:
+            network.append_output_node(node)
 
 
 def parse_keras_network(network, network_data):
