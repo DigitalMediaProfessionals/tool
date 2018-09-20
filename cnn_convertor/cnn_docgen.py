@@ -2625,7 +2625,8 @@ def output_page(of, network_name, gengraph, fpga_net):
                      str(layer.node_in.type),
                      str(layer.node_in.input_dim),
                      str(layer.node_in.output_dim),
-                     fpga_layer.get_fc_weight_size(layer.node_in),
+                     fpga_layer.get_fc_weight_size(layer.node_in, fpga_net.quantization),
+
                      mul_ops, add_ops))
     of.write(
         '| SUM | - | - | - | - | - | - | {0} | {1} |\n'.format(total_mul_ops, total_add_ops))
@@ -2639,7 +2640,8 @@ def output_page(of, network_name, gengraph, fpga_net):
 
 
 def graph_name(name: str) -> str:
-    return name.replace('/', '_')
+    return name.replace('/', '_').replace('-', '_')
+
 
 
 def output_graph(of, fpga_net):

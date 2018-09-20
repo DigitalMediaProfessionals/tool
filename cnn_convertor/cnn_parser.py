@@ -19,7 +19,6 @@ from cnn_convertor import cnn_layer, parser_caffe, parser_keras
 
 
 def parse_network(
-
     network_def: str,
     network_data: str,
     network_type: str,

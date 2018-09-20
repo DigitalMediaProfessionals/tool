@@ -37,7 +37,6 @@ parser = argparse.ArgumentParser(
     description="DNN to FPGA convertor",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("INPUT_INI", type=str, help="Input ini file")
-
 parser.add_argument("--debug", type=bool, default=0, help="Split Keras network for debugging")
 parser.add_argument("--input_file", type=str, help="Input image for network debugging")
 parser.add_argument("--integer_test", type=bool, default=0, help="Input image for network debugging")

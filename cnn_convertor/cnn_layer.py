@@ -34,6 +34,7 @@ class NodeType(IntEnum):
     UpSampling = auto()
     Power = auto()
     ReLU = auto()
+    PReLU = auto()
     TanH = auto()
     Input = auto()
     Data = auto()
@@ -179,14 +180,15 @@ class Network(object):
         """Construct an empty CNN.
         """
         self.input_nodes = []
-        self.output_node = None
+        self.output_nodes = []
         self.debug_node = None
         self.custom_layer = custom_layer
         self.dim_override = dim_override
         self.tensorflow_backend = False
 
     def build_traverse_list(self) -> None:
-        pending = [self.output_node]
+        pending = self.output_nodes[:]
+        pending.reverse()
         tlist = []
         while len(pending) > 0:
             node = pending.pop()
@@ -205,8 +207,8 @@ class Network(object):
     def append_input_node(self, node):
         self.input_nodes.append(node)
 
-    def set_output_node(self, node):
-        self.output_node = node
+    def append_output_node(self, node):
+        self.output_nodes.append(node)
 
     def split_pool_node(self, node):
         # only handle case where kernel_size[0] and [1] are equal now

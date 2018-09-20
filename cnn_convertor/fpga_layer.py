@@ -8,6 +8,7 @@
 
         http://www.apache.org/licenses/LICENSE-2.0
 
+
     Unless required by applicable law or agreed to in writing, software
     distributed under the License is distributed on an "AS IS" BASIS,
     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -319,13 +320,18 @@ def pack_weight(node, of, quantization):
                                          kernel_size[0])
 
 
-def pack_fc_weight(node, conv_node, of):
+def pack_fc_weight(node, conv_node, of, quantization):
     logging.info('Packing FC weight for node: %s.', node.name)
-    centers, labels = calc_kmeans(node.weight)
-    index8 = labels.astype(np.uint8)
+
+    if quantization:
+        centers, labels = calc_kmeans(node.weight)
+        labels = labels.astype(np.uint8)
+    else:
+        labels = node.weight.astype(np.float16)
     bias16 = node.bias.astype(np.float16)
 
-    centers.tofile(of)
+    if quantization:
+        centers.tofile(of)
     if conv_node is not None:
         if len(conv_node.output_dim) == 3:
             w, h, c = conv_node.output_dim
@@ -334,13 +340,13 @@ def pack_fc_weight(node, conv_node, of):
         m = node.param.num_output
         if w != 1 or h != 1:
             logging.info('Reordering FC weight for node: %s.', node.name)
-            index8.shape = (m, c, h, w)
+            labels.shape = (m, c, h, w)
             for n in range(m):
                 for d in range(0, c, 8):
                     e = d + 8 if d + 8 < c else c
-                    tr_index8 = index8[n, d:e, :, :].transpose(2, 1, 0)
-                    index8[n, d:e, :, :] = tr_index8.reshape(e - d, h, w)
-    index8.tofile(of)
+                    tr_index8 = labels[n, d:e, :, :].transpose(2, 1, 0)
+                    labels[n, d:e, :, :] = tr_index8.reshape(e - d, h, w)
+    labels.tofile(of)
     bias16.tofile(of)
 
 
@@ -367,13 +373,17 @@ def get_weight_size(node, quantization):
     return weight_size
 
 
-def get_fc_weight_size(node):
+
+def get_fc_weight_size(node, quantization):
     if len(node.input_dim) == 3:
         w, h, c = node.input_dim
     elif len(node.input_dim) == 1:
         w, h, c = 1, 1, node.input_dim[0]
     m = node.output_dim[0]
-    size = w * h * c * m + m * 2 + 512
+    if quantization:
+        size = w * h * c * m + m * 2 + 512
+    else:
+        size = w * h * c * m * 2 + m * 2
     return size
 
 
@@ -630,7 +640,7 @@ def gen_source_conv(of, name, n, layer, quantization):
         weight_offset += get_weight_size(run.conv, quantization)
 
 
-def gen_source_fc(of, name, n, layer):
+def gen_source_fc(of, name, n, layer, quantization):
     global weight_offset
     node = layer.node_in
     if len(node.input_dim) == 3:
@@ -638,7 +648,7 @@ def gen_source_fc(of, name, n, layer):
     elif len(node.input_dim) == 1:
         w, h, c = 1, 1, node.input_dim[0]
     m = node.output_dim[0]
-    size = get_fc_weight_size(node)
+    size = get_fc_weight_size(node, quantization)
     actfunc = 0
     actparam = 0
     if node.act_node:
@@ -671,7 +681,7 @@ def gen_source_fc(of, name, n, layer):
              '  conf.input_buf.offs = {0};\n'.format(layer.layer_in[0].output_addr_offset))
     of.write('  conf.output_buf.mem = io_mem_;\n'
              '  conf.output_buf.offs = {0};\n'.format(layer.output_addr_offset))
-    of.write('  conf.weight_fmt = 1;  // 0 = unquantized weight matrix, 1 = qunatized\n')
+    of.write('  conf.weight_fmt = {0};  // 0 = unquantized weight matrix, 1 = qunatized\n'.format((1 if quantization else 0)))
     of.write('  conf.actfunc = {0};  // Activation Function: 0 = None, 1 = ReLU, 2 = Tanh, 3 = Leaky ReLU, 4 = Sigmoid, 5 = PReLU (PReLU must be used with POST-OP=1)\n'.format(actfunc))
     of.write('  conf.actfunc_param = 0x{0:X};  // Leaky ReLU parameter (in FP16 format), 0 = non-leaky\n'.format(actparam))
     weight_offset += size
@@ -692,7 +702,7 @@ def gen_source_layer(of, name, n, layer, quantization):
         gen_source_conv(of, name, n, layer, quantization)
         of.write('\n')
     elif layer.type is LayerType.InnerProduct:
-        gen_source_fc(of, name, n, layer)
+        gen_source_fc(of, name, n, layer, quantization)
         of.write('\n')
     else:
         if layer.type is LayerType.Input:
@@ -730,7 +740,7 @@ def gen_source_layer(of, name, n, layer, quantization):
     elif layer.type is LayerType.CopyConcatenate:
         of.write('  static fpga_layer *input_layers[] = {\n')
         for layer_in in layer.layer_in:
-            of.write('    &layers[{0}],\n'.format(layer_in.index))
+            of.write('    &layers_[{0}],\n'.format(layer_in.index))
         of.write('  };\n\n')
 
     of.write('  fpga_layer& layer = get_layer({0});\n'.format(n))
@@ -847,7 +857,8 @@ class FPGALayer(object):
                 if len(self.run) == 0:
                     need_copy = False
                     if len(node.output_dim) == 3:
-                        for node_in in node.input_nodes:
+                        # ignore the last input node
+                        for node_in in node.input_nodes[:-1]:
                             if node_in.output_dim[2] % 8 != 0:
                                 need_copy = True
                                 break
@@ -1041,25 +1052,26 @@ class FPGANetwork(object):
         if layer_start_index != -1:
             layer = FPGALayer(tl[layer_start_index:index])
             self.layer.append(layer)
-
-        if self.layer[-1].node_out is net.traverse_list[-1]:
-            self.layer[-1].is_output = True
-        else:
-            output_nodes = [net.traverse_list[-1]]
-            i = 0
-            while i < len(output_nodes):
-                node = output_nodes[i]
-                i += 1
-                for node_in in node.input_nodes:
-                    out_node_reached = False
-                    if node_in in converted_node:
-                        for layer in reversed(self.layer):
-                            if layer.node_out is node_in:
-                                out_node_reached = True
-                                layer.is_output = True
-                                break
-                    if not out_node_reached:
-                        output_nodes.append(node_in)
+        # determine output layers
+        output_nodes = net.output_nodes[:]
+        for layer in self.layer:
+            if layer.node_out in output_nodes:
+                layer.is_output = True
+                output_nodes.remove(layer.node_out)
+        i = 0
+        while i < len(output_nodes):
+            node = output_nodes[i]
+            i += 1
+            for node_in in node.input_nodes:
+                out_node_reached = False
+                if node_in in converted_node:
+                    for layer in reversed(self.layer):
+                        if layer.node_out is node_in:
+                            out_node_reached = True
+                            layer.is_output = True
+                            break
+                if not out_node_reached:
+                    output_nodes.append(node_in)
 
         self.connect_layers()
 
@@ -1091,7 +1103,7 @@ class FPGANetwork(object):
                     weight_size += get_weight_size(run.conv, self.quantization)
             elif layer.type is LayerType.InnerProduct:
                 self.num_fc_layers += 1
-                weight_size += get_fc_weight_size(layer.node_in)
+                weight_size += get_fc_weight_size(layer.node_in, self.quantization)
             if layer.is_output:
                 self.num_output_layers += 1
                 self.output_layer.append(layer)
@@ -1216,7 +1228,7 @@ class FPGANetwork(object):
                             run.conv.type is NodeType.Convolution):
                         pack_weight(run.conv, of, self.quantization)
             elif layer.type is LayerType.InnerProduct:
-                pack_fc_weight(layer.node_in, prev_node, of)
+                pack_fc_weight(layer.node_in, prev_node, of, self.quantization)
             prev_node = layer.node_out
 
     def output_network(self, output_folder: str, network_name: str,

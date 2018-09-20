@@ -47,6 +47,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
         'Upsample': NodeType.UpSampling,
         'Power': NodeType.Power,
         'ReLU': NodeType.ReLU,
+        'PReLU': NodeType.PReLU,
         'TanH': NodeType.TanH,
         'ELU': NodeType.ELU,
         'Sigmoid': NodeType.Sigmoid,
@@ -84,6 +85,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
         network.debug_node = caffe_net
         top_map[caffe_net.input[0]] = node
     # Handle each layer node
+    parsed_nodes = []
     for i, layer in enumerate(caffe_net.layer):
         logging.debug('Handling layer %d, Name: %s, Type %s',
                       i, layer.name, layer.type)
@@ -94,7 +96,8 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
 
         node_type = type_map[layer.type]
         if node_type in (NodeType.ReLU, NodeType.TanH, NodeType.ELU,
-                         NodeType.Sigmoid, NodeType.BatchNorm, NodeType.Scale):
+                         NodeType.Sigmoid, NodeType.BatchNorm, NodeType.Scale,
+                         NodeType.PReLU):
             node = cnn_layer.LayerNode(layer.name, node_type)
             up_node = top_map[layer.bottom[0]]
             if node_type == NodeType.BatchNorm:
@@ -102,6 +105,8 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             elif node_type == NodeType.Scale:
                 up_node.set_scale_node(node)
             else:
+                if node_type == NodeType.PReLU:
+                    pass
                 if node_type == NodeType.ReLU:
                     param = cnn_layer.NodeParam()
                     param.relu_param = layer.relu_param.negative_slope
@@ -119,6 +124,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             if label in top_map:
                 input_nodes.append(top_map[label])
         node = cnn_layer.LayerNode(layer.name, node_type, input_nodes)
+        parsed_nodes.append(node)
 
         # add this node to top_map and bottom_map
         for label in layer.top:
@@ -171,8 +177,11 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
         elif node_type == NodeType.LRN:
             param = cnn_layer.NodeParam()
             node.set_param(param)
-        last_node = node
-    network.set_output_node(last_node)
+
+    for node in parsed_nodes:
+        if len(node.output_nodes) == 0:
+            network.append_output_node(node)
+
 
 
 def parse_caffe_def(

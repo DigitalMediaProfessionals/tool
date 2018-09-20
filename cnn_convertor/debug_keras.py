@@ -31,6 +31,10 @@ used_input=0
 
 
 import googlenet_custom_layers
+try:
+    import keras_applications
+except: 
+    pass
 
 def get_input(layer_name, network_folder_name, input_params):
 	layer_filename = layer_name.replace('/','_') 
@@ -151,8 +155,11 @@ def layer_split(fpga_network, network_def, **kwargs):
 	globs = globals()  # All layers.
 	globs['Model'] = models.Model
 	globs['Sequential'] = models.Sequential
-	custom_objects = {'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D, 'LRN': googlenet_custom_layers.LRN2D}
-
+	
+	try:
+		custom_objects = {'relu6': keras.applications.mobilenet.relu6, 'LRN': googlenet_custom_layers.LRN2D}
+	except:
+		custom_objects = {'relu6': keras_applications.mobilenet_v2.layers.ReLU(6, name='relu6'), 'LRN': googlenet_custom_layers.LRN2D}
 	# globs['Conv2D']= layers.Conv2D
 	# globs['LRN']= googlenet_custom_layers.LRN
 	# globs['relu6']=keras.applications.mobilenet.relu6
