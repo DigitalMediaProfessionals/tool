@@ -909,6 +909,34 @@ class FPGANetwork(object):
             self.custom_layer_config = net.custom_layer
             self.convert_network(net)
 
+    def convert_even_to_odd_kernel_size(self, conv_node):
+        filter_sizew = conv_node.param.kernel_size[0]
+        filter_sizeh = conv_node.param.kernel_size[1]
+        new_filter_sizew = filter_sizew
+        new_filter_sizeh = filter_sizeh
+        resize = False
+        if(filter_sizew == 2 or filter_sizew == 4 or filter_sizew == 6):
+            new_filter_sizew += 1
+            resize = True
+        if(filter_sizeh == 2 or filter_sizeh == 4 or filter_sizeh == 6):
+            new_filter_sizeh += 1 
+            resize = True
+        if(resize == True):
+            new_weight = []
+            count = 1
+            tmp = conv_node.weight
+            for i in range(0,len(tmp)):
+                if(i % filter_sizew == 0):
+                    new_weight.append(0.0)
+                    count -= 1
+                    if(count == 0):
+                        count = filter_sizew
+                        for j in range(0, new_filter_sizew):
+                            new_weight.append(0.0)
+                new_weight.append(tmp[i]);
+            conv_node.weight = np.array(new_weight, dtype=np.float32);print(new_weight)
+            conv_node.param.kernel_size = tuple([new_filter_sizew, new_filter_sizeh])
+
     def convert_network(self, net: cnn_layer.Network) -> None:
         tl = net.traverse_list
         converted_node = []
@@ -925,6 +953,7 @@ class FPGANetwork(object):
                 prev_node_type = None
             if (node.type is NodeType.Convolution or
                     node.type is NodeType.LRN):
+                self.convert_even_to_odd_kernel_size(node);print(node.weight)
                 pass
             elif node.type is NodeType.Pooling:
                 # Test if the pool node can merge with previous convolution node

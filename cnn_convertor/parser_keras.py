@@ -289,17 +289,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             if (layer_type != 'DepthwiseConv2D' and
                     layer_type != 'SeparableConv2D'):
                 param.num_output = config['filters']
-            filter_sizew = config['kernel_size'][0]
-            filter_sizeh = config['kernel_size'][1]
-            #if filter size is even number then add 1
-            resize = False
-            if(filter_sizew == 2 or filter_sizew == 4 or filter_sizew == 6):
-              filter_sizew += 1
-              resize = True
-            if(filter_sizeh == 2 or filter_sizeh == 4 or filter_sizeh == 6):
-              filter_sizeh += 1 
-              resize = True
-            param.kernel_size = tuple([filter_sizew, filter_sizeh])
+            param.kernel_size = tuple(config['kernel_size'])
             param.pad = get_padding()
             param.keras_padding = config['padding']
             param.stride = tuple(config['strides'])
@@ -333,22 +323,6 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 else:
                     weights = get_weights(netweight, layer_name, need_flip,
                                           ['kernel', 'bias'])
-                    #addjust weight matrix
-                    if(resize == True):
-                      new_weight = []
-                      count = 1
-                      tmp = weights[0]
-                      for i in range(0,len(tmp)):
-                        if(i % config['kernel_size'][0] == 0):
-                          new_weight.append(0.0)
-                          count -= 1
-                          if(count == 0):
-                            count = config['kernel_size'][0]
-                            for j in range(0, filter_sizew):
-                              new_weight.append(0.0)
-                        new_weight.append(tmp[i]);
-                      del weights[0]
-                      weights.insert(0, np.array(new_weight, dtype=np.float32));print(weights)
                     node.set_weight_bias(weights[0], weights[1])
         elif node_type == NodeType.Pooling:
             param = cnn_layer.NodeParam()
