@@ -62,6 +62,7 @@ def get_actfunc(tpe):
     return {
         NodeType.TanH: 1,
         NodeType.Sigmoid: 3,
+        NodeType.PReLU: 4,
         NodeType.ELU: 5}.get(tpe, 2)
 
 
@@ -227,6 +228,10 @@ def pack_weight(node, of, quantization):
 
     if node.bn_node is not None or node.sc_node is not None:
         weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m)
+    if node.act_node and node.act_node.type == NodeType.PReLU:
+        prelu = node.act_node.weight
+    else:
+        prelu = None
 
     if quantization:
         centers, labels = calc_kmeans(weight)
@@ -235,6 +240,10 @@ def pack_weight(node, of, quantization):
         labels = weight.astype(np.float16)
         weight_type = np.float16
     bias16 = bias.astype(np.float16)
+    if prelu is not None:
+        prelu16 = prelu.astype(np.float16)
+    else:
+        prelu16 = None
     buffer = np.zeros(shape=(12, 6), dtype=weight_type)
 
     labels.shape = (n_m, n_c, kernel_size[1], kernel_size[0])
@@ -246,6 +255,10 @@ def pack_weight(node, of, quantization):
             bias16[m_start:m_stop].tofile(of)
             for i in range(m_stop, m_start + 8):
                 of.write(b'\0\0')
+            if prelu16 is not None:
+                prelu16[m_start:m_stop].tofile(of)
+                for i in range(m_stop, m_start + 8):
+                    of.write(b'\0\0')
             for c_start in range(0, n_c, 8):
                 c_stop = min(c_start + 8, n_c)
                 for m in range(m_start, m_stop):
@@ -264,6 +277,10 @@ def pack_weight(node, of, quantization):
             bias16[m_start:m_stop].tofile(of)
             for i in range(m_stop, m_start + 8):
                 of.write(b'\0\0')
+            if prelu16 is not None:
+                prelu16[m_start:m_stop].tofile(of)
+                for i in range(m_stop, m_start + 8):
+                    of.write(b'\0\0')
             for c_start in range(0, n_c, 8):
                 c_stop = min(c_start + 8, n_c)
                 for m in range(m_start, m_stop):
@@ -282,6 +299,10 @@ def pack_weight(node, of, quantization):
             bias16[m_start:m_stop].tofile(of)
             for i in range(m_stop, m_start + 8):
                 of.write(b'\0\0')
+            if prelu16 is not None:
+                prelu16[m_start:m_stop].tofile(of)
+                for i in range(m_stop, m_start + 8):
+                    of.write(b'\0\0')
             for c_start in range(0, n_c, 8):
                 c_stop = min(c_start + 8, n_c)
                 for m in range(m_start, m_stop):
@@ -300,6 +321,10 @@ def pack_weight(node, of, quantization):
             bias16[m_start:m_stop].tofile(of)
             for i in range(m_stop, m_start + 8):
                 of.write(b'\0\0')
+            if prelu16 is not None:
+                prelu16[m_start:m_stop].tofile(of)
+                for i in range(m_stop, m_start + 8):
+                    of.write(b'\0\0')
             for c_start in range(0, n_c, 64):
                 c_stop = min(c_start + 64, n_c)
                 for m in range(m_start, m_stop):
@@ -315,8 +340,8 @@ def pack_weight(node, of, quantization):
     else:
         logging.exception('Encountered unsupported kernel size %d.',
                           kernel_size[0])
-        raise cnn_exception.ConvertError('Unsupported kernel size' +
-                                         kernel_size[0])
+        raise cnn_exception.ConvertError('Unsupported kernel size ' +
+                                         str(kernel_size[0]))
 
     # add 0 padding so weight size will be 16-bytes aligned
     d = of.tell() & 15
@@ -334,6 +359,10 @@ def pack_fc_weight(node, conv_node, of, quantization):
     else:
         labels = node.weight.astype(np.float16)
     bias16 = node.bias.astype(np.float16)
+    if node.act_node and node.act_node.type == NodeType.PReLU:
+        prelu16 = node.act_node.weight.astype(np.float16)
+    else:
+        prelu16 = None
 
     offs = 0
     if quantization:
@@ -371,6 +400,15 @@ def pack_fc_weight(node, conv_node, of, quantization):
         np.zeros(16 - d, dtype=np.uint8).tofile(of)
         offs += 16 - d
 
+    if prelu16 is not None:
+        prelu16.tofile(of)
+        offs += prelu16.nbytes
+        d = offs & 15  # add 0 padding so prelu size will be 16-bytes aligned
+        if d:
+            logging.info("Added %d zeros to align prelu size", d)
+            np.zeros(16 - d, dtype=np.uint8).tofile(of)
+            offs += 16 - d
+
 
 def get_weight_size(node, quantization):
     if node is None or node.type is not NodeType.Convolution:
@@ -393,6 +431,9 @@ def get_weight_size(node, quantization):
         weight_size = (weight_size + 0xf) & (~0xf)  # align to 16 bytes
     else:
         weight_size = 144 * m * c + 16 * ((m + 7) // 8)
+    # add PReLU parameter size
+    if node.act_node and node.act_node.type == NodeType.PReLU:
+        weight_size += 16 * ((m + 7) // 8)
     return weight_size
 
 
@@ -409,6 +450,10 @@ def get_fc_weight_size(node, quantization):
     size = (size + 0xf) & (~0xf)  # align to 16 bytes
     size += m * 2
     size = (size + 0xf) & (~0xf)  # align to 16 bytes
+    # add PReLU parameter size
+    if node.act_node and node.act_node.type == NodeType.PReLU:
+        weight_size += m * 2
+        size = (size + 0xf) & (~0xf)  # align to 16 bytes
     return size
 
 
@@ -677,6 +722,8 @@ def gen_source_fc(of, name, n, layer, quantization):
             actfunc = 2
         elif node.act_node.type == NodeType.Sigmoid:
             actfunc = 4
+        elif node.act_node.type == NodeType.PReLU:
+            actfunc = 5
         else:
             raise ValueError("Unsupported activation: %s" % node.act_node.type)
     of.write('// Layer_{0}: Fully Connected Layer\n'.format(n))
