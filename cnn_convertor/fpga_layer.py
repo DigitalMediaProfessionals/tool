@@ -452,7 +452,7 @@ def get_fc_weight_size(node, quantization):
     size = (size + 0xf) & (~0xf)  # align to 16 bytes
     # add PReLU parameter size
     if node.act_node and node.act_node.type == NodeType.PReLU:
-        weight_size += m * 2
+        size += m * 2
         size = (size + 0xf) & (~0xf)  # align to 16 bytes
     return size
 

@@ -278,5 +278,5 @@ def parse_caffe_data(
         if layer.act_node and layer.act_node.type == NodeType.PReLU:
             caffe_layer = search_caffe_layer(layers, layer.act_node.name)
             weight = np.float32(caffe_layer.blobs[0].data)
-            bias = np.zeros((layer.output_dim[2]))
+            bias = np.zeros((layer.output_dim[-1]))
             layer.act_node.set_weight_bias(weight, bias)
