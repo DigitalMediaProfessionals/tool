@@ -910,31 +910,32 @@ class FPGANetwork(object):
             self.convert_network(net)
 
     def convert_even_to_odd_kernel_size(self, conv_node):
-        filter_sizew = conv_node.param.kernel_size[0]
-        filter_sizeh = conv_node.param.kernel_size[1]
-        new_filter_sizew = filter_sizew
+        filter_sizeh = conv_node.param.kernel_size[0]
+        filter_sizew = conv_node.param.kernel_size[1]
         new_filter_sizeh = filter_sizeh
-        resize = False
-        if(filter_sizew == 2 or filter_sizew == 4 or filter_sizew == 6):
-            new_filter_sizew += 1
-            resize = True
+        new_filter_sizew = filter_sizew
+        resizew = False
+        resizeh = False
         if(filter_sizeh == 2 or filter_sizeh == 4 or filter_sizeh == 6):
-            new_filter_sizeh += 1 
-            resize = True
-        if(resize == True):
+            new_filter_sizeh += 1
+            resizeh = True
+        if(filter_sizew == 2 or filter_sizew == 4 or filter_sizew == 6):
+            new_filter_sizew += 1 
+            resizew = True
+        if(resizew == True or resizeh == True):
             new_weight = []
-            count = 1
+            total = filter_sizew * filter_sizeh
             tmp = conv_node.weight
-            for i in range(0,len(tmp)):
-                if(i % filter_sizew == 0):
-                    new_weight.append(0.0)
-                    count -= 1
-                    if(count == 0):
-                        count = filter_sizew
+            for i in range(0, len(tmp)):
+                if(resizeh == True):
+                    if(i % total == 0):
                         for j in range(0, new_filter_sizew):
                             new_weight.append(0.0)
+                if(resizew == True):
+                    if(i % filter_sizew == 0):
+                        new_weight.append(0.0)
                 new_weight.append(tmp[i]);
-            conv_node.weight = np.array(new_weight, dtype=np.float32);print(new_weight)
+            conv_node.weight = np.array(new_weight, dtype=np.float32)
             conv_node.param.kernel_size = tuple([new_filter_sizew, new_filter_sizeh])
 
     def convert_network(self, net: cnn_layer.Network) -> None:
