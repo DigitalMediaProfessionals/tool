@@ -29,6 +29,9 @@ set_session(sess)  # set this TensorFlow session as the default session for Kera
 
 used_input=0
 
+node_layer_name=''
+
+node_layer_name_pre=''
 
 import googlenet_custom_layers
 try:
@@ -428,7 +431,9 @@ def layer_split(fpga_network, network_def, **kwargs):
 			# for input_node in input_nodes:
 			# 	model_inputs[input_node.name] = Input(shape=input_node.output_dim)
 			
-			for node_layer in node_layers:	
+			global node_layer_name_pre
+
+			for node_layer_count, node_layer in enumerate(node_layers):
 				node_layer_name = node_layer.name
 				keras_layer = model_load.get_layer(node_layer_name)
 				keras_layer_class = keras_layer.__class__
@@ -514,6 +519,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 						pass
 
 			name = name.replace('/','_')
+			
 			keras_model = Model(inputs = model_inputs_list, outputs = keras_layers[node_layer_name])
 			keras_model_file = network_folder_name+'/'+network_name+str(i)+name+'.png'
 
@@ -522,10 +528,34 @@ def layer_split(fpga_network, network_def, **kwargs):
 				keras_model_layer_name = keras_model_layer.name
 				try:
 					keras_model_layer_weights = model_load_weights[keras_model_layer_name]
-					keras_model_layer.set_weights(keras_model_layer_weights)
+					if keras_model_layer_name.find("BatchNorm") != -1:
+						layer_name = keras_model_layer_name.replace('_BatchNorm','')
+						keras_model_tmp = Model(inputs = model_inputs_list, outputs = keras_model.get_layer(layer_name).output)
+						layer_name = node_layer_name_pre
+						# print("Get output from {}".format(layer_name))
+						data, filename, data16 = get_input(layer_name, network_folder_name, input_params)
+						global used_input
+						if node_layer_count==0:
+							used_input = 0
+
+						batchnorm_input = keras_model_tmp.predict(data)
+						print(batchnorm_input)
+						beta = model_load_weights[keras_model_layer_name][0]
+						mean = np.mean(batchnorm_input, axis=(1,2))
+						mean = np.squeeze(mean)
+						variance = np.var(batchnorm_input, axis=(1,2))
+						variance = np.squeeze(variance)
+						betas = []
+						betas.append(beta)
+						betas.append(np.asarray(mean))
+						betas.append(np.asarray(variance))
+						keras_model_layer.set_weights(betas)
+					else:
+						keras_model_layer.set_weights(keras_model_layer_weights)
 				except:
 					pass
 
+			node_layer_name_pre = node_layer_name
 
 			input_data=[]
 			input_data16=[]
@@ -549,7 +579,6 @@ def layer_split(fpga_network, network_def, **kwargs):
 				input_files.append(filename)
 				input_data16.append(data16)
 
-			
 			try:
 				prediction = keras_model.predict(input_data)
 				prediction.dump(network_folder_name+'keras_outputs/'+str(i).zfill(3)+'_'+name+'.npy')

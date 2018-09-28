@@ -13,10 +13,10 @@ import sys
 # from random import random
 from bokeh.layouts import column, row
 from bokeh.models import Button
-from bokeh.palettes import RdYlBu3
+from bokeh.palettes import RdYlBu3, viridis
 from bokeh.plotting import figure, curdoc
 from bokeh.models import HoverTool, GlyphRenderer
-from bokeh.models import LinearColorMapper, ColorBar, BasicTicker, Label
+from bokeh.models import LinearColorMapper, CategoricalColorMapper, ColorBar, BasicTicker, Label
 
 def remap(arr, dim):
     if len(dim) == 1:
@@ -105,6 +105,8 @@ def get_image(channel, view, dataset1, dataset2):
         image = dataset1[channel]-dataset2[channel]
     if view==3:
         image = point_rel_difference(dataset1[channel] , dataset2[channel])
+    if view==4:
+        image = dataset1[channel]-dataset2[channel]
     return image
 
 def make_data_dict(layer):
@@ -138,7 +140,7 @@ def make_plot(layer, view, data1, data2):
             # img=img[::-1] #image shows upside down by default
             if view==3: 
                 img=np.pad(img, pad_width=1, mode='constant', constant_values=1)
-                view_label='Normalised Difference'
+                view_label='Activation Difference'
             else:
                 img=np.pad(img, pad_width=1, mode='constant', constant_values=np.max(img))
                 if view==0:
@@ -147,8 +149,9 @@ def make_plot(layer, view, data1, data2):
                     view_label=data2select.value
                 if view==2:
                     view_label='{0}, {1} Difference'.format(data1select.value, data2select.value)
-                if view==3:
-                    view_label='{0}, {1} Normalised Difference'.format(data1select.value, data2select.value)
+                if view==4:
+                    view_label='{0}, {1} Difference - Limited ColorRange'.format(data1select.value, data2select.value)
+
 
             if channel%8==0:
                 if channel!=0:
@@ -159,6 +162,9 @@ def make_plot(layer, view, data1, data2):
 
         row=np.hstack(row)
         imgs.append(row)
+        if view==4:
+            data1std = np.std(dataset1)    
+
         if imgs[0].shape!=imgs[-1].shape:
             imgs[-1] = np.pad(imgs[-1], pad_width=[(0,0),(0,imgs[0].shape[1]-imgs[-1].shape[1])], mode='constant', constant_values=0)
         imgs = np.vstack(imgs)
@@ -178,12 +184,15 @@ def make_plot(layer, view, data1, data2):
             color_mapper = LinearColorMapper(palette="Viridis256", low=np.min(imgs), high=np.max(imgs))
         elif view==3:
             color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
+        elif view==4:
+            color_mapper = LinearColorMapper(palette="Viridis256", low=-data1std/2, high=data1std/2)
         else:
             # color_mapper = LinearColorMapper(palette="Viridis256", low=min_val, high=max_val)
             color_mapper = LinearColorMapper(palette="Viridis256", low=np.min(imgs), high=np.max(imgs))
         p.image(image=[imgs], x=0, y=0, dw=imgs.shape[1], dh=imgs.shape[0], color_mapper=color_mapper)
 
-        hover = HoverTool(tooltips = [("x", "$x{int}"), ("y", "$y{int}"), ("value", "@image")])
+        hover = HoverTool(tooltips = [("value", "@image")])
+        # hover = HoverTool(tooltips = [("x", "$x{int}"), ("y", "$y{int}"), ("value", "@image")])
         p.add_tools(hover)
         color_bar = ColorBar(color_mapper=color_mapper, ticker=BasicTicker(),
                  label_standoff=5, border_line_color=None, location=(0,0), width=10, height=250)
@@ -192,7 +201,7 @@ def make_plot(layer, view, data1, data2):
     else:
         channels=0
         x_vals = np.arange(length)
-        p = figure(tools=TOOLS,title="Layer "+str(layer) + 'Graph View. Layer: '+ os.path.basename(keras_files[layer]), plot_width=1200, plot_height=800)
+        p = figure(tools=TOOLS,title="Layer "+str(layer) + 'Graph View. Layer: '+ os.path.basename(keras_files[layer]),toolbar_location="left", plot_width=1200, plot_height=800)
         source_dict={}
         source_dict['x']=x_vals
         hover_tooltips = [("x", "$x{(0)}")]
@@ -357,7 +366,8 @@ view_dict={
     'Data1'         : 0,
     'Data2'          : 1,
     'Difference'    : 2,
-    'Normalised Difference':3,
+    'Activation Difference':3,
+    'Difference - Limited ColorRange':4,
 }
 layer=0
 data_dict=make_data_dict(layer)
@@ -377,21 +387,25 @@ data2select.on_change('value', update_plot)
 
 if args.save_layers==1:
     for l in range(len(keras_outputs)):
-        html_name="layer"+str(l).zfill(3)+"_norm_difference"
+        html_name="layer"+str(l).zfill(3)+"_data1"
         output_file(visual_output_folder+html_name+".html", title=html_name)
         p, channels=make_plot(l, 0, 0, 1)
         save(column(p))
-        html_name="layer"+str(l).zfill(3)+"_norm_difference"
+        html_name="layer"+str(l).zfill(3)+"_data2"
         output_file(visual_output_folder+html_name+".html", title=html_name)
         p, channels=make_plot(l, 1, 0, 1)
         save(column(p))
-        html_name="layer"+str(l).zfill(3)+"_norm_difference"
+        html_name="layer"+str(l).zfill(3)+"_difference"
         output_file(visual_output_folder+html_name+".html", title=html_name)
         p, channels=make_plot(l, 2, 0, 1)
         save(column(p))
-        html_name="layer"+str(l).zfill(3)+"_norm_difference"
+        html_name="layer"+str(l).zfill(3)+"_act_difference"
         output_file(visual_output_folder+html_name+".html", title=html_name)
         p, channels=make_plot(l, 3, 0, 1)
+        save(column(p))
+        html_name="layer"+str(l).zfill(3)+"_color_limit_difference"
+        output_file(visual_output_folder+html_name+".html", title=html_name)
+        p, channels=make_plot(l, 4, 0, 1)
         save(column(p))
     
 

@@ -20,6 +20,8 @@ import cv2
 from keras.utils import plot_model
 from keras import backend as K
 from keras.backend.tensorflow_backend import set_session
+import benchmark
+
 
 keras.backend.clear_session()
 config = tf.ConfigProto()
@@ -161,5 +163,6 @@ for i, layer in enumerate(layers.items()):
     
     prev_layer_name = layer_name
 
+benchmark.write_benchmark_file(network_debug_folder)
 print('Done.')
     			
