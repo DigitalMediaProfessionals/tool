@@ -212,6 +212,14 @@ def pack_weight(node, of, quantization):
     n_m = node.output_dim[2]
     kernel_size = node.param.kernel_size
 
+    kernel_sizew = kernel_size[0]
+    kernel_sizeh = kernel_size[1]
+    if(kernel_size[0] == 2 or kernel_size[0] == 4 or kernel_size[0] == 6):
+        kernel_sizew += 1
+    if(kernel_size[1] == 2 or kernel_size[1] == 4 or kernel_size[1] == 6):
+        kernel_sizeh += 1
+    kernel_size = tuple([kernel_sizew, kernel_sizeh])
+
     weight = node.weight
     bias = node.bias
     if weight is None or bias is None:
@@ -936,7 +944,7 @@ class FPGANetwork(object):
                         new_weight.append(0.0)
                 new_weight.append(tmp[i]);
             conv_node.weight = np.array(new_weight, dtype=np.float32)
-            conv_node.param.kernel_size = tuple([new_filter_sizew, new_filter_sizeh])
+            #conv_node.param.kernel_size = tuple([new_filter_sizew, new_filter_sizeh])
 
     def convert_network(self, net: cnn_layer.Network) -> None:
         tl = net.traverse_list
@@ -954,7 +962,7 @@ class FPGANetwork(object):
                 prev_node_type = None
             if (node.type is NodeType.Convolution or
                     node.type is NodeType.LRN):
-                self.convert_even_to_odd_kernel_size(node);print(node.weight)
+                self.convert_even_to_odd_kernel_size(node)
                 pass
             elif node.type is NodeType.Pooling:
                 # Test if the pool node can merge with previous convolution node
