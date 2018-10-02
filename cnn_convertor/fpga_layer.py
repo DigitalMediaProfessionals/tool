@@ -362,6 +362,13 @@ def get_weight_size(node, quantization):
         c //= node.param.group
     m = node.output_dim[2]
     k = node.param.kernel_size
+    kw = k[0]
+    kh = k[1]
+    if(k[0] == 2 or k[0] == 4 or k[0] == 6):
+        kw += 1
+    if(k[1] == 2 or k[1] == 4 or k[1] == 6):
+        kh += 1
+    k = tuple([kw, kh])
     if k[0] == 7:
         pass
     if k[0] == 5:
