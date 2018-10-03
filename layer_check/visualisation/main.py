@@ -163,12 +163,15 @@ def make_plot(layer, view, data1, data2):
         row=np.hstack(row)
         imgs.append(row)
         if view==4:
-            data1std = np.std(dataset1)    
+            data1std = np.std(dataset1[dataset1==dataset1])    
 
         if imgs[0].shape!=imgs[-1].shape:
             imgs[-1] = np.pad(imgs[-1], pad_width=[(0,0),(0,imgs[0].shape[1]-imgs[-1].shape[1])], mode='constant', constant_values=0)
         imgs = np.vstack(imgs)
         imgs=imgs[::-1]
+
+        if len(imgs[imgs!=imgs])>0:
+            imgs[imgs!=imgs]=imgs[imgs==imgs].max()
         # imgs=imgs[:1000]
         ratio = imgs.shape[0]/imgs.shape[1]
         width=width*200
@@ -179,16 +182,18 @@ def make_plot(layer, view, data1, data2):
             width=int(height/ratio)
         p = figure(title=view_label + ' View. Layer: '+ os.path.basename(keras_files[layer]),x_range=(0, imgs.shape[1]), y_range=(0, imgs.shape[0]),toolbar_location="left", plot_width=width, plot_height=height)
         p.title.text_font_size = "20px"
-        if view==2:
-            # color_mapper = LinearColorMapper(palette="Viridis256", low=-0.4, high=0.6)
-            color_mapper = LinearColorMapper(palette="Viridis256", low=np.min(imgs), high=np.max(imgs))
-        elif view==3:
+        if view==3:
             color_mapper = LinearColorMapper(palette="Viridis256", low=-1, high=1)
         elif view==4:
             color_mapper = LinearColorMapper(palette="Viridis256", low=-data1std/2, high=data1std/2)
         else:
             # color_mapper = LinearColorMapper(palette="Viridis256", low=min_val, high=max_val)
-            color_mapper = LinearColorMapper(palette="Viridis256", low=np.min(imgs), high=np.max(imgs))
+            color_min=np.min(imgs)
+            color_max=np.max(imgs)
+            if color_min == color_max:
+                color_max=2*color_min
+
+            color_mapper = LinearColorMapper(palette="Viridis256", low=color_min, high=color_max)
         p.image(image=[imgs], x=0, y=0, dw=imgs.shape[1], dh=imgs.shape[0], color_mapper=color_mapper)
 
         hover = HoverTool(tooltips = [("value", "@image")])
