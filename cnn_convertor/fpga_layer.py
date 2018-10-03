@@ -212,6 +212,14 @@ def pack_weight(node, of, quantization):
     n_m = node.output_dim[2]
     kernel_size = node.param.kernel_size
 
+    kernel_sizew = kernel_size[0]
+    kernel_sizeh = kernel_size[1]
+    if(kernel_size[0] == 2 or kernel_size[0] == 4 or kernel_size[0] == 6):
+        kernel_sizew += 1
+    if(kernel_size[1] == 2 or kernel_size[1] == 4 or kernel_size[1] == 6):
+        kernel_sizeh += 1
+    kernel_size = tuple([kernel_sizew, kernel_sizeh])
+
     weight = node.weight
     bias = node.bias
     if weight is None or bias is None:
@@ -354,6 +362,13 @@ def get_weight_size(node, quantization):
         c //= node.param.group
     m = node.output_dim[2]
     k = node.param.kernel_size
+    kw = k[0]
+    kh = k[1]
+    if(k[0] == 2 or k[0] == 4 or k[0] == 6):
+        kw += 1
+    if(k[1] == 2 or k[1] == 4 or k[1] == 6):
+        kh += 1
+    k = tuple([kw, kh])
     if k[0] == 7:
         pass
     if k[0] == 5:
@@ -909,6 +924,35 @@ class FPGANetwork(object):
             self.custom_layer_config = net.custom_layer
             self.convert_network(net)
 
+    def convert_even_to_odd_kernel_size(self, conv_node):
+        filter_sizeh = conv_node.param.kernel_size[0]
+        filter_sizew = conv_node.param.kernel_size[1]
+        new_filter_sizeh = filter_sizeh
+        new_filter_sizew = filter_sizew
+        resizew = False
+        resizeh = False
+        if(filter_sizeh == 2 or filter_sizeh == 4 or filter_sizeh == 6):
+            new_filter_sizeh += 1
+            resizeh = True
+        if(filter_sizew == 2 or filter_sizew == 4 or filter_sizew == 6):
+            new_filter_sizew += 1 
+            resizew = True
+        if(resizew == True or resizeh == True):
+            new_weight = []
+            total = filter_sizew * filter_sizeh
+            tmp = conv_node.weight
+            for i in range(0, len(tmp)):
+                if(resizeh == True):
+                    if(i % total == 0):
+                        for j in range(0, new_filter_sizew):
+                            new_weight.append(0.0)
+                if(resizew == True):
+                    if(i % filter_sizew == 0):
+                        new_weight.append(0.0)
+                new_weight.append(tmp[i]);
+            conv_node.weight = np.array(new_weight, dtype=np.float32)
+            #conv_node.param.kernel_size = tuple([new_filter_sizew, new_filter_sizeh])
+
     def convert_network(self, net: cnn_layer.Network) -> None:
         tl = net.traverse_list
         converted_node = []
@@ -925,6 +969,7 @@ class FPGANetwork(object):
                 prev_node_type = None
             if (node.type is NodeType.Convolution or
                     node.type is NodeType.LRN):
+                self.convert_even_to_odd_kernel_size(node)
                 pass
             elif node.type is NodeType.Pooling:
                 # Test if the pool node can merge with previous convolution node
