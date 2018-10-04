@@ -321,7 +321,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
 					with CustomObjectScope(custom_objects):
-						keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer)
+						keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer, training=True)
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 
 				if node_layer.act_node:
@@ -503,7 +503,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
 					with CustomObjectScope(custom_objects):
-						keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
+						keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name], training=True)
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 
 				if node_layer.act_node:
@@ -528,30 +528,32 @@ def layer_split(fpga_network, network_def, **kwargs):
 				keras_model_layer_name = keras_model_layer.name
 				try:
 					keras_model_layer_weights = model_load_weights[keras_model_layer_name]
-					if keras_model_layer_name.find("BatchNorm") != -1:
-						layer_name = keras_model_layer_name.replace('_BatchNorm','')
-						keras_model_tmp = Model(inputs = model_inputs_list, outputs = keras_model.get_layer(layer_name).output)
-						layer_name = node_layer_name_pre
-						# print("Get output from {}".format(layer_name))
-						data, filename, data16 = get_input(layer_name, network_folder_name, input_params)
-						global used_input
-						if node_layer_count==0:
-							used_input = 0
 
-						batchnorm_input = keras_model_tmp.predict(data)
-						print(batchnorm_input)
-						beta = model_load_weights[keras_model_layer_name][0]
-						mean = np.mean(batchnorm_input, axis=(1,2))
-						mean = np.squeeze(mean)
-						variance = np.var(batchnorm_input, axis=(1,2))
-						variance = np.squeeze(variance)
-						betas = []
-						betas.append(beta)
-						betas.append(np.asarray(mean))
-						betas.append(np.asarray(variance))
-						keras_model_layer.set_weights(betas)
-					else:
-						keras_model_layer.set_weights(keras_model_layer_weights)
+					keras_model_layer.set_weights(keras_model_layer_weights)
+					# if keras_model_layer_name.find("BatchNorm") != -1:
+					# 	layer_name = keras_model_layer_name.replace('_BatchNorm','')
+					# 	keras_model_tmp = Model(inputs = model_inputs_list, outputs = keras_model.get_layer(layer_name).output)
+					# 	layer_name = node_layer_name_pre
+					# 	# print("Get output from {}".format(layer_name))
+					# 	data, filename, data16 = get_input(layer_name, network_folder_name, input_params)
+					# 	global used_input
+					# 	if node_layer_count==0:
+					# 		used_input = 0
+
+					# 	batchnorm_input = keras_model_tmp.predict(data)
+					# 	print(batchnorm_input)
+					# 	beta = model_load_weights[keras_model_layer_name][0]
+					# 	mean = np.mean(batchnorm_input, axis=(1,2))
+					# 	mean = np.squeeze(mean)
+					# 	variance = np.var(batchnorm_input, axis=(1,2))
+					# 	variance = np.squeeze(variance)
+					# 	betas = []
+					# 	betas.append(beta)
+					# 	betas.append(np.asarray(mean))
+					# 	betas.append(np.asarray(variance))
+					# 	keras_model_layer.set_weights(betas)
+					# else:
+						# keras_model_layer.set_weights(keras_model_layer_weights)
 				except:
 					pass
 
