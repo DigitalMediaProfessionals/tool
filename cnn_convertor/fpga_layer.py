@@ -939,7 +939,7 @@ class FPGANetwork(object):
             m = conv_node.output_dim[2]
             weight = conv_node.weight
             weight.shape = (m, c, filter_sizeh, filter_sizew)
-            weight = np.pad(weight, ((0, 0), (0, 0), (0, padh), (padw, 0)),
+            weight = np.pad(weight, ((0, 0), (0, 0), (padh, 0), (0, padw)),
                             'constant')
             conv_node.weight = weight
 
