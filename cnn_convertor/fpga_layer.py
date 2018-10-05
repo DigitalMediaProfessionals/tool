@@ -203,6 +203,12 @@ def calc_kmeans(weight):
     return centers, labels
 
 
+def get_kernel_size_for_weight(node):
+    k = node.param.kernel_size
+    p = max(k[0], k[1]) | 1
+    return (p, p)
+
+
 def pack_weight(node, of, quantization):
     logging.info('Packing weight for node: %s.', node.name)
 
@@ -210,7 +216,7 @@ def pack_weight(node, of, quantization):
     if node.param.group > 1:
         n_c = n_c // node.param.group
     n_m = node.output_dim[2]
-    kernel_size = node.param.kernel_size
+    kernel_size = get_kernel_size_for_weight(node)
 
     weight = node.weight
     bias = node.bias
@@ -362,7 +368,7 @@ def get_weight_size(node, quantization):
     if node.param.group > 1:
         c //= node.param.group
     m = node.output_dim[2]
-    k = node.param.kernel_size
+    k = get_kernel_size_for_weight(node)
     if k[0] == 7:
         pass
     if k[0] == 5:
@@ -920,6 +926,23 @@ class FPGANetwork(object):
             self.custom_layer_config = net.custom_layer
             self.convert_network(net)
 
+    def pad_weight_matrix(self, conv_node):
+        filter_sizew = conv_node.param.kernel_size[0]
+        filter_sizeh = conv_node.param.kernel_size[1]
+        kernel_size = get_kernel_size_for_weight(conv_node)
+        padw = kernel_size[0] - filter_sizew
+        padh = kernel_size[1] - filter_sizeh
+        if padw != 0 or padh != 0:
+            c = conv_node.input_dim[2]
+            if conv_node.param.group > 1:
+                c //= conv_node.param.group
+            m = conv_node.output_dim[2]
+            weight = conv_node.weight
+            weight.shape = (m, c, filter_sizeh, filter_sizew)
+            weight = np.pad(weight, ((0, 0), (0, 0), (0, padh), (padw, 0)),
+                            'constant')
+            conv_node.weight = weight
+
     def convert_network(self, net: cnn_layer.Network) -> None:
         tl = net.traverse_list
         converted_node = []
@@ -936,6 +959,7 @@ class FPGANetwork(object):
                 prev_node_type = None
             if (node.type is NodeType.Convolution or
                     node.type is NodeType.LRN):
+                self.pad_weight_matrix(node)
                 pass
             elif node.type is NodeType.Pooling:
                 # Test if the pool node can merge with previous convolution node
