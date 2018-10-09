@@ -226,7 +226,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             elif type(pad[0]) is not list:
                 padding = (pad[1], pad[0])
             else:
-                padding = (pad[0][0], pad[1][0])
+                padding = (pad[1][0], pad[0][0])
             top_map[layer_name] = up_node
             continue
         elif layer_type == 'Merge':
@@ -289,10 +289,11 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             if (layer_type != 'DepthwiseConv2D' and
                     layer_type != 'SeparableConv2D'):
                 param.num_output = config['filters']
-            param.kernel_size = tuple(config['kernel_size'])
+            param.kernel_size = (config['kernel_size'][1],
+                                 config['kernel_size'][0])
             param.pad = get_padding()
             param.keras_padding = config['padding']
-            param.stride = tuple(config['strides'])
+            param.stride = (config['strides'][1], config['strides'][0])
             if (layer_type == 'DepthwiseConv2D' or
                     layer_type == 'SeparableConv2D'):
                 param.group = config['depth_multiplier']
@@ -331,16 +332,17 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             else:
                 param.pool = 1
             if layer_type in ('MaxPooling2D', 'AveragePooling2D'):
-                param.kernel_size = tuple(config['pool_size'])
+                param.kernel_size = (config['pool_size'][1],
+                                     config['pool_size'][0])
                 param.pad = get_padding()
                 param.keras_padding = config['padding']
-                param.stride = tuple(config['strides'])
+                param.stride = (config['strides'][1], config['strides'][0])
             else:
                 param.is_global = True
             node.set_param(param)
         elif node_type == NodeType.UpSampling:
             param = cnn_layer.NodeParam()
-            param.kernel_size = tuple(config['size'])
+            param.kernel_size = (config['size'][1], config['size'][0])
             node.set_param(param)
         elif node_type == NodeType.InnerProduct:
             param = cnn_layer.NodeParam()
