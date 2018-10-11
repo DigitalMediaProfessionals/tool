@@ -326,8 +326,10 @@ def pack_fc_weight(node, conv_node, of, quantization):
         labels = node.weight.astype(np.float16)
     bias16 = node.bias.astype(np.float16)
 
+    offs = 0
     if quantization:
         centers.tofile(of)
+        offs += centers.nbytes
     if conv_node is not None:
         if len(conv_node.output_dim) == 3:
             w, h, c = conv_node.output_dim
@@ -343,6 +345,13 @@ def pack_fc_weight(node, conv_node, of, quantization):
                     tr_index8 = labels[n, d:e, :, :].transpose(2, 1, 0)
                     labels[n, d:e, :, :] = tr_index8.reshape(e - d, h, w)
     labels.tofile(of)
+    offs += labels.nbytes
+
+    d = offs & 15  # bias must be 16-bytes aligned
+    if d:
+        logging.info("Added %d zeros to align bias", d)
+        np.zeros(16 - d, dtype=np.uint8).tofile(of)
+
     bias16.tofile(of)
 
 
