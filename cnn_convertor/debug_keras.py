@@ -320,8 +320,12 @@ def layer_split(fpga_network, network_def, **kwargs):
 					keras_layer = model_load.get_layer(sub_layer_name)
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
-					with CustomObjectScope(custom_objects):
-						keras_out_layer = keras_layer_class(**keras_layer_config)(keras_out_layer, training=True)
+					if re.search('FusedBatchNorm', keras_layer.output.name):
+						with CustomObjectScope(custom_objects):
+							keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name], training=True)
+					else:
+						with CustomObjectScope(custom_objects):
+							keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 
 				if node_layer.act_node:
@@ -502,8 +506,12 @@ def layer_split(fpga_network, network_def, **kwargs):
 					keras_layer = model_load.get_layer(sub_layer_name)
 					keras_layer_class = keras_layer.__class__
 					keras_layer_config = keras_layer.get_config()
-					with CustomObjectScope(custom_objects):
-						keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name], training=True)
+					if re.search('FusedBatchNorm', keras_layer.output.name):
+						with CustomObjectScope(custom_objects):
+							keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name], training=True)
+					else:
+						with CustomObjectScope(custom_objects):
+							keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
 						# keras_out_layer.set_weights(keras_layer.get_weights())
 
 				if node_layer.act_node:
