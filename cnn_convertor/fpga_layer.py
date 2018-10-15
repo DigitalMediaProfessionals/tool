@@ -385,9 +385,11 @@ def get_fc_weight_size(node, quantization):
         w, h, c = 1, 1, node.input_dim[0]
     m = node.output_dim[0]
     if quantization:
-        size = w * h * c * m + m * 2 + 512
+        size = w * h * c * m + 512
     else:
-        size = w * h * c * m * 2 + m * 2
+        size = w * h * c * m * 2
+    size = (size + 0xf) & (~0xf)  # align to 16 bytes
+    size += m * 2
     return size
 
 
