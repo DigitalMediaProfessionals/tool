@@ -112,6 +112,10 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
                     param.relu_param = layer.relu_param.negative_slope
                     node.set_param(param)
                 up_node.set_activation_node(node)
+            # If this is not in-place layer, add the up_node to the top_map
+            # Using the output label of this layer too
+            if layer.top[0] != layer.bottom[0]:
+                top_map[layer.top[0]] = up_node
             continue
         elif node_type in (NodeType.DropOut, NodeType.Data):
             # Ignore data and drop out layer
