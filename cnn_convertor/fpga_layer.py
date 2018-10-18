@@ -558,10 +558,13 @@ def gen_source_conv(of, name, n, layer, quantization):
     for i, run in enumerate(layer.run):
         is_conv = run.conv is not None and run.conv.type is NodeType.Convolution
         is_lrn = run.conv is not None and run.conv.type is NodeType.LRN
-        p = (run.conv.param.kernel_size[0] if is_conv else 1)
         if is_conv:
+            p = run.conv.param.kernel_size[0]
+            if run.conv.param.kernel_size[1] != run.conv.param.kernel_size[0]:
+                p |= (run.conv.param.kernel_size[1] << 8)
             conv_enable = (1 if run.conv.param.group <= 1 else 3)
         else:
+            p = 1
             conv_enable = 0
         conv_pad = (run.conv.param.pad[0] | (
             run.conv.param.pad[1] << 16) if is_conv else 0)
@@ -632,7 +635,7 @@ def gen_source_conv(of, name, n, layer, quantization):
             of.write('  //->: {0}\n'.format(run.pool.name))
         of.write('  conf.run[{0}].m = {1};  // Output Channels\n'.format(i, m))
         of.write('  conf.run[{0}].conv_enable = {1};  // 1 = Enabled, 0 = Disabled\n'.format(i, conv_enable))
-        of.write('  conf.run[{0}].p = {1};  // Filter Width and Height\n'.format(i, p))
+        of.write('  conf.run[{0}].p = 0x{1:X};  // Filter Width and Height\n'.format(i, p))
         of.write('  conf.run[{0}].pz = 1;  // Filter Depth\n'.format(i))
         of.write('  conf.run[{0}].weight_buf.mem = weights_mem_;\n'
                  '  conf.run[{0}].weight_buf.offs = {1};\n'.format(i, weight_offset))
