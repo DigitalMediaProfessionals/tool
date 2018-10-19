@@ -29,6 +29,7 @@ import configparser
 import logging
 from importlib import import_module
 from cnn_convertor import cnn_parser, fpga_layer
+from cnn_convertor import pywrapper as pyw
 
 
 # Handle parameters
@@ -62,7 +63,7 @@ config.read_dict({'INPUT': {'custom_layer': '',
                   'OUTPUT': {'generate_source': 0,
                              'generate_doxy': 0,
                              'generate_dot': 0,
-                             'quantization': 1
+                             'quantization': 1,
                              'python_module': ''},
                   'OPTIONAL': {'verbose': 0,
                                'graphviz_path': ''}
@@ -134,4 +135,12 @@ network = cnn_parser.parse_network(network_def, network_data, network_type,
 fpga_net = fpga_layer.FPGANetwork(network, output_quantization)
 fpga_net.output_network(output_folder, network_name, output_gensource,
                         output_gendoc, output_gengraph, graphviz_path)
+
+# Create Python Wrapper
+if output_python_module:
+    pywrap_path = os.path.abspath(os.path.join(os.path.join(output_folder, network_name), output_python_module + ".cpp"))
+    pyw.output_pywrapper(pywrap_path,
+            module=output_python_module,
+            header=network_name + "_gen.h",
+            netcls="C" + network_name)
 
