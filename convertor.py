@@ -143,4 +143,3 @@ if output_python_module:
             module=output_python_module,
             header=network_name + "_gen.h",
             netcls="C" + network_name)
-
