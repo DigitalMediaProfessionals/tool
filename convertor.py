@@ -138,8 +138,9 @@ fpga_net.output_network(output_folder, network_name, output_gensource,
 
 # Create Python Wrapper
 if output_python_module:
-    pywrap_path = os.path.abspath(os.path.join(os.path.join(output_folder, network_name), output_python_module + ".cpp"))
+    pywrap_path = os.path.abspath(os.path.join(os.path.join(
+        output_folder, network_name), output_python_module + ".cpp"))
     pyw.output_pywrapper(pywrap_path,
-            module=output_python_module,
-            header=network_name + "_gen.h",
-            netcls="C" + network_name)
+                         module=output_python_module,
+                         header=network_name + "_gen.h",
+                         netcls="C" + network_name)

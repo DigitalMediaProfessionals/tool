@@ -20,6 +20,7 @@ import os
 import os.path as osp
 from jinja2 import Environment, FileSystemLoader
 
+
 def output_pywrapper(out_path: str, netcls: str, module: str, header: str):
     """
     output c++ source file of python wrapper for netcls
@@ -35,9 +36,9 @@ def output_pywrapper(out_path: str, netcls: str, module: str, header: str):
     env = Environment(loader=FileSystemLoader(template_dir, encoding="utf8"))
     tpl = env.get_template("pywrapper.cpp.template")
     code = tpl.render({"path_base": path_base,
-        "netcls": netcls,
-        "module": module,
-        "header": header})
+                       "netcls": netcls,
+                       "module": module,
+                       "header": header})
 
     # write
     with open(out_path, "w") as of:
