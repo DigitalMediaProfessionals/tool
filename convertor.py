@@ -62,7 +62,8 @@ config.read_dict({'INPUT': {'custom_layer': '',
                   'OUTPUT': {'generate_source': 0,
                              'generate_doxy': 0,
                              'generate_dot': 0,
-                             'quantization': 1},
+                             'quantization': 1
+                             'python_module': ''},
                   'OPTIONAL': {'verbose': 0,
                                'graphviz_path': ''}
                   })
@@ -86,6 +87,7 @@ try:
     output_gendoc = config.getboolean('OUTPUT', 'generate_doxy')
     output_gengraph = config.getboolean('OUTPUT', 'generate_dot')
     output_quantization = config.getboolean('OUTPUT', 'quantization')
+    output_python_module = config['OUTPUT']['python_module']
     verbose = config.getboolean('OPTIONAL', 'verbose')
     graphviz_path = config['OPTIONAL']['graphviz_path']
 except:
@@ -132,3 +134,4 @@ network = cnn_parser.parse_network(network_def, network_data, network_type,
 fpga_net = fpga_layer.FPGANetwork(network, output_quantization)
 fpga_net.output_network(output_folder, network_name, output_gensource,
                         output_gendoc, output_gengraph, graphviz_path)
+
