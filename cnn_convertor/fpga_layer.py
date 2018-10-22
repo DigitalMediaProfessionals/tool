@@ -387,7 +387,7 @@ def pack_fc_weight(node, conv_node, of, quantization):
 
     d = offs & 15  # bias must be 16-bytes aligned
     if d:
-        logging.info("Added %d zeros to align bias", d)
+        logging.info("Added %d zeros to align bias", 16 - d)
         np.zeros(16 - d, dtype=np.uint8).tofile(of)
         offs += 16 - d
 
@@ -396,7 +396,7 @@ def pack_fc_weight(node, conv_node, of, quantization):
 
     d = offs & 15  # add 0 padding so weight size will be 16-bytes aligned
     if d:
-        logging.info("Added %d zeros to align bias size", d)
+        logging.info("Added %d zeros to align bias size", 16 - d)
         np.zeros(16 - d, dtype=np.uint8).tofile(of)
         offs += 16 - d
 
@@ -405,7 +405,7 @@ def pack_fc_weight(node, conv_node, of, quantization):
         offs += prelu16.nbytes
         d = offs & 15  # add 0 padding so prelu size will be 16-bytes aligned
         if d:
-            logging.info("Added %d zeros to align prelu size", d)
+            logging.info("Added %d zeros to align prelu size", 16 -d)
             np.zeros(16 - d, dtype=np.uint8).tofile(of)
             offs += 16 - d
 
