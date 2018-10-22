@@ -357,8 +357,16 @@ def pack_fc_weight(node, conv_node, of, quantization):
     if d:
         logging.info("Added %d zeros to align bias", d)
         np.zeros(16 - d, dtype=np.uint8).tofile(of)
+        offs += 16 - d
 
     bias16.tofile(of)
+    offs += bias16.nbytes
+
+    d = offs & 15  # add 0 padding so weight size will be 16-bytes aligned
+    if d:
+        logging.info("Added %d zeros to align bias size", d)
+        np.zeros(16 - d, dtype=np.uint8).tofile(of)
+        offs += 16 - d
 
 
 def get_weight_size(node, quantization):
@@ -396,6 +404,7 @@ def get_fc_weight_size(node, quantization):
         size = w * h * c * m * 2
     size = (size + 0xf) & (~0xf)  # align to 16 bytes
     size += m * 2
+    size = (size + 0xf) & (~0xf)  # align to 16 bytes
     return size
 
 
