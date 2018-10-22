@@ -321,6 +321,12 @@ def pack_weight(node, of, quantization):
         raise cnn_exception.ConvertError('Unsupported kernel size' +
                                          kernel_size[0])
 
+    # add 0 padding so weight size will be 16-bytes aligned
+    d = of.tell() & 15
+    if d:
+        logging.info("Added %d zeros to align weight size", 16 - d)
+        np.zeros(16 - d, dtype=np.uint8).tofile(of)
+
 
 def pack_fc_weight(node, conv_node, of, quantization):
     logging.info('Packing FC weight for node: %s.', node.name)
@@ -387,6 +393,7 @@ def get_weight_size(node, quantization):
         c = c // 64 + (0 if c % 64 == 0 else 1)
     if quantization:
         weight_size = 512 + 72 * m * c + 16 * ((m + 7) // 8)
+        weight_size = (weight_size + 0xf) & (~0xf)  # align to 16 bytes
     else:
         weight_size = 144 * m * c + 16 * ((m + 7) // 8)
     return weight_size
