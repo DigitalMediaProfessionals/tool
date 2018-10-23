@@ -21,6 +21,10 @@ from typing import List, Union, Tuple
 from enum import IntEnum, auto
 
 
+def get_conv_out_width(width, kx, pad_left, pad_right, stride):
+    return (pad_left + width + pad_right - kx) // stride + 1
+
+
 class NodeType(IntEnum):
     NonSupported = auto()
     Convolution = auto()
@@ -57,7 +61,7 @@ class NodeParam(object):
     def __init__(self):
         self.num_output = 0
         self.kernel_size = (1, 1)
-        self.pad = (0, 0)
+        self._pad = [0, 0, 0, 0]
         self.keras_padding = None
         self.stride = (1, 1)
         self.pool = 0  # 0:max, 1:avg
@@ -68,11 +72,74 @@ class NodeParam(object):
         self.axis = -1
         self.custom_param = None
         self.scale = 1.0
+        self.split_pool_divisor = None
+
+    @property
+    def pad(self):
+        raise ValueError("Getter for NodeParam.pad is disabled")
+
+    @pad.setter
+    def pad(self, value):
+        raise ValueError("Setter for NodeParam.pad is disabled")
+
+    @property
+    def pad_lrtb(self):
+        """Returns reference to list with 4 elements with padding.
+        """
+        assert len(self._pad) == 4
+        return self._pad
+
+    @pad_lrtb.setter
+    def pad_lrtb(self, value):
+        assert len(self._pad) == 4
+        try:
+            assert all(int(x) == x for x in value)
+            if len(value) == 4:
+                self._pad[0] = int(value[0])
+                self._pad[1] = int(value[1])
+                self._pad[2] = int(value[2])
+                self._pad[3] = int(value[3])
+            elif len(value) == 2:
+                self._pad[0] = int(value[0])
+                self._pad[1] = int(value[0])
+                self._pad[2] = int(value[1])
+                self._pad[3] = int(value[1])
+            elif len(value) == 1:
+                self._pad[0] = int(value[0])
+                self._pad[1] = int(value[0])
+                self._pad[2] = int(value[0])
+                self._pad[3] = int(value[0])
+            elif len(value) == 0:
+                self._pad[0] = 0
+                self._pad[1] = 0
+                self._pad[2] = 0
+                self._pad[3] = 0
+            else:
+                raise ValueError("Invalid value for pad_lrtb: %s" % value)
+        except TypeError:
+            assert int(value) == value
+            self._pad[0] = int(value)
+            self._pad[1] = int(value)
+            self._pad[2] = int(value)
+            self._pad[3] = int(value)
+        assert len(self._pad) == 4
+
+    @property
+    def pad_fpga(self):
+        """Returns integer in FPGA hardware format for padding.
+        """
+        assert len(self.pad_lrtb) == 4
+        return (self.pad_lrtb[0] | (self.pad_lrtb[1] << 8) |
+                (self.pad_lrtb[2] << 16) | (self.pad_lrtb[3] << 24))
+
+    @pad_fpga.setter
+    def pad_fpga(self, value):
+        raise ValueError("Setter for pad_fpga is disabled")
 
     def __repr__(self):
         ret = ("[num_output:%d, kernel_size:%s, pad:%s, stride:%s, pool:%d, "
                "group:%d, relu_param:%f, is_global:%d]")
-        return ret % (self.num_output, self.kernel_size, self.pad,
+        return ret % (self.num_output, self.kernel_size, self.pad_lrtb,
                       self.stride, self.pool, self.group, self.relu_param,
                       self.is_global)
 
@@ -210,24 +277,68 @@ class Network(object):
     def append_output_node(self, node):
         self.output_nodes.append(node)
 
-    def split_pool_node(self, node):
-        # only handle case where kernel_size[0] and [1] are equal now
+    def split_pool_node(self, node, level=0, remaining_divisor=None):
+        # Only handle case where kernel_size[0] and [1] are equal now
+        if node.param.kernel_size[0] != node.param.kernel_size[1]:
+            raise cnn_exception.ConvertError(
+                "Support for pooling size %dx%d is not implemented" %
+                (node.param.kernel_size[0], node.param.kernel_size[1]))
+        if (not node.param.is_global and
+                (node.param.stride[0] != node.param.kernel_size[0] or
+                 node.param.stride[1] != node.param.kernel_size[1])):
+            raise cnn_exception.ConvertError(
+                "Support for pooling size %dx%d with stride %dx%d "
+                "is not implemented" %
+                (node.param.kernel_size[0], node.param.kernel_size[1],
+                 node.param.stride[0], node.param.stride[1]))
         candidates = [7, 6, 5, 4, 3, 2]
         insert_index = self.traverse_list.index(node) + 1
-        k_size = node.param.kernel_size[0]
         split_size = 0
-        for c in candidates:
-            if k_size % c == 0:
-                split_size = c
+        kernel_padding = 0
+        for _i in range(7):
+            for c in candidates:
+                if (node.param.kernel_size[0] + kernel_padding) % c == 0:
+                    split_size = c
+                    break
+            if split_size == 0:
+                if node.param.pool == 0:
+                    msg = ("Support for max pooling of size "
+                           "%d x %d is not implemented" %
+                           (node.param.kernel_size[0],
+                            node.param.kernel_size[1]))
+                    logging.exception(msg)
+                    raise cnn_exception.ConvertError(msg)
+                kernel_padding += 1
+            else:
                 break
         if split_size == 0:
-            logging.exception('Handling node %s, pool size not supported',
-                              node.name)
-            raise cnn_exception.ConvertError('Pool size unsupported')
-        remain_size = node.param.kernel_size[0] // split_size
-        remain_dim = (node.input_dim[0] // split_size,
-                      node.input_dim[1] // split_size,
-                      node.input_dim[2])
+            raise cnn_exception.ConvertError(
+                "Possible implementation error detected: "
+                "control should not reach this line")
+
+        if level == 0:
+            assert node.param.split_pool_divisor is None and \
+                remaining_divisor is None
+            remaining_divisor = (node.param.kernel_size[0] *
+                                 node.param.kernel_size[0])
+        node.param.split_pool_divisor = split_size * split_size
+        remaining_divisor /= node.param.split_pool_divisor
+
+        remain_size = (node.param.kernel_size[0] +
+                       kernel_padding) // split_size
+
+        mx, my = 1, 1
+        while mx or my:
+            dx, mx = divmod(node.param.pad_lrtb[0] + node.input_dim[0] +
+                            node.param.pad_lrtb[1], split_size)
+            dy, my = divmod(node.param.pad_lrtb[2] + node.input_dim[0] +
+                            node.param.pad_lrtb[3], split_size)
+            if mx:
+                node.param.pad_lrtb[1] += 1
+            if my:
+                node.param.pad_lrtb[3] += 1
+
+        remain_dim = (dx, dy, node.input_dim[2])
 
         remain_node = LayerNode(node.name + '_' + str(remain_size),
                                 NodeType.Pooling)
@@ -245,8 +356,8 @@ class Network(object):
         param = NodeParam()
         param.pool = node.param.pool
         param.kernel_size = (remain_size, remain_size)
-        param.pad = (0, 0)
         param.stride = node.param.stride
+        param.split_pool_divisor = remaining_divisor
         remain_node.set_param(param)
         node.param.kernel_size = (split_size, split_size)
         node.param.stride = (split_size, split_size)
@@ -254,7 +365,7 @@ class Network(object):
         self.traverse_list.insert(insert_index, remain_node)
 
         if remain_size > 7:
-            self.split_pool_node(remain_node)
+            self.split_pool_node(remain_node, level + 1, remaining_divisor)
 
     def insert_flatten_node(self, node, dim):
         insert_index = self.traverse_list.index(node)
@@ -276,44 +387,78 @@ class Network(object):
         def get_output_xy(dim: Tuple[int],
                           param: NodeParam,
                           is_pool: bool) -> Tuple[int]:
+
+            if param.is_global:
+                raise cnn_exception.ConvertError(
+                    "get_output_xy() must not be called on "
+                    "global pooling layers")
+
             w, h = dim[0], dim[1]
-            w += param.pad[0] * 2
-            h += param.pad[1] * 2
-            if param.keras_padding == 'same':
-                if w % param.stride[0] == 0:
-                    pw = param.pad[0] + \
-                        max(param.kernel_size[0] - param.stride[0], 0)
-                else:
-                    pw = param.pad[0] + \
-                        max(param.kernel_size[0] - w % param.stride[0], 0)
-                if h % param.stride[1] == 0:
-                    ph = param.pad[1] + \
-                        max(param.kernel_size[1] - param.stride[1], 0)
-                else:
-                    ph = param.pad[1] + \
-                        max(param.kernel_size[1] - h % param.stride[1], 0)
-                param.pad = ((pw + 1) // 2, (ph + 1) // 2)
-                w += pw
-                h += ph
-            w = ((w - param.kernel_size[0]) / param.stride[0]) + 1
-            h = ((h - param.kernel_size[1]) / param.stride[1]) + 1
-            if is_pool:
-                w = math.ceil(w)
-                h = math.ceil(h)
-                # adjust padding
-                padx = param.pad[0]
-                while ((dim[0] + padx - param.kernel_size[0])
-                       % param.stride[0]) > padx:
-                    padx += 1
-                pady = param.pad[1]
-                while ((dim[1] + pady - param.kernel_size[1])
-                       % param.stride[1]) > pady:
-                    pady += 1
-                param.pad = (padx, pady)
+
+            if param.keras_padding == "same":
+                ow = math.ceil(float(w) / param.stride[0])
+                oh = math.ceil(float(h) / param.stride[1])
+
+                # Increase padding if necessary
+                while get_conv_out_width(
+                        w, param.kernel_size[0], param.pad_lrtb[0],
+                        param.pad_lrtb[1], param.stride[0]) < ow:
+                    param.pad_lrtb[0 if param.pad_lrtb[0] < param.pad_lrtb[1]
+                                   else 1] += 1
+                while get_conv_out_width(
+                        h, param.kernel_size[1], param.pad_lrtb[2],
+                        param.pad_lrtb[3], param.stride[1]) < oh:
+                    param.pad_lrtb[2 if param.pad_lrtb[2] < param.pad_lrtb[3]
+                                   else 3] += 1
+                # Decrease padding if necessary
+                while get_conv_out_width(
+                        w, param.kernel_size[0], param.pad_lrtb[0],
+                        param.pad_lrtb[1], param.stride[0]) > ow:
+                    param.pad_lrtb[0 if param.pad_lrtb[0] >= param.pad_lrtb[1]
+                                   else 1] -= 1
+                while get_conv_out_width(
+                        h, param.kernel_size[1], param.pad_lrtb[2],
+                        param.pad_lrtb[3], param.stride[1]) > oh:
+                    param.pad_lrtb[2 if param.pad_lrtb[2] >= param.pad_lrtb[3]
+                                   else 3] -= 1
+                assert get_conv_out_width(
+                        w, param.kernel_size[0], param.pad_lrtb[0],
+                        param.pad_lrtb[1], param.stride[0]) == ow
+                assert get_conv_out_width(
+                        h, param.kernel_size[1], param.pad_lrtb[2],
+                        param.pad_lrtb[3], param.stride[1]) == oh
+
+            ow = (float(param.pad_lrtb[0] + w + param.pad_lrtb[1] -
+                        param.kernel_size[0]) / param.stride[0]) + 1
+            oh = (float(param.pad_lrtb[2] + h + param.pad_lrtb[3] -
+                        param.kernel_size[1]) / param.stride[1]) + 1
+
+            if is_pool and param.keras_padding is None:
+                # Handle non-Keras (Caffe) padding separately
+                ow = math.ceil(ow)
+                oh = math.ceil(oh)
+                # Increase padding if necessary
+                while get_conv_out_width(
+                        w, param.kernel_size[0], param.pad_lrtb[0],
+                        param.pad_lrtb[1], param.stride[0]) < ow:
+                    param.pad_lrtb[0 if param.pad_lrtb[0] < param.pad_lrtb[1]
+                                   else 1] += 1
+                while get_conv_out_width(
+                        h, param.kernel_size[1], param.pad_lrtb[2],
+                        param.pad_lrtb[3], param.stride[1]) < oh:
+                    param.pad_lrtb[2 if param.pad_lrtb[2] < param.pad_lrtb[3]
+                                   else 3] += 1
+                assert get_conv_out_width(
+                        w, param.kernel_size[0], param.pad_lrtb[0],
+                        param.pad_lrtb[1], param.stride[0]) == ow
+                assert get_conv_out_width(
+                        h, param.kernel_size[1], param.pad_lrtb[2],
+                        param.pad_lrtb[3], param.stride[1]) == oh
             else:
-                w = math.floor(w)
-                h = math.floor(h)
-            return w, h
+                ow = math.floor(ow)
+                oh = math.floor(oh)
+
+            return ow, oh
 
         # Override input dimension if dim_override is given
         if self.dim_override:
@@ -331,7 +476,10 @@ class Network(object):
             # Set it here
             dim = node.input_nodes[0].output_dim
             if node.param.num_output == 0:
-                node.param.num_output = dim[-1] * node.param.group
+                try:
+                    node.param.num_output = dim[-1] * node.param.group
+                except IndexError:
+                    print("Got index error")
                 node.param.group = dim[-1]
             if node.type == NodeType.Convolution:
                 node.set_input_dim(dim)
