@@ -23,13 +23,13 @@ import numpy as np
 
 
 NodeType = cnn_layer.NodeType
-padding = (0, 0)
+padding = [0, 0, 0, 0]
 
 
 def get_padding():
     global padding
-    ret = tuple(padding)
-    padding = (0, 0)
+    ret = list(padding)
+    padding = [0, 0, 0, 0]
     return ret
 
 
@@ -195,8 +195,8 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 # skip setting num_output and set it
                 # when calculating in_out sizes
                 param.kernel_size = (1, 1)
-                param.pad = (0, 0)
-                param.keras_padding = 'same'
+                param.pad_lrtb = 0, 0, 0, 0
+                param.keras_padding = "same"
                 param.stride = (1, 1)
                 param.group = 1
                 up_node.set_param(param)
@@ -221,12 +221,67 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             # there is no padding layer if caffe so just extract padding info
             global padding
             pad = config['padding']
-            if type(pad) is not list:
-                padding = (pad, pad)
-            elif type(pad[0]) is not list:
-                padding = (pad[1], pad[0])
-            else:
-                padding = (pad[1][0], pad[0][0])
+            try:
+                if len(pad) == 4:
+                    if not all(int(x) == x for x in pad):
+                        raise ValueError(
+                            "Unsupported Keras ZeroPadding2D: %s" % pad)
+                    padding = list(int(x) for x in pad)
+                elif len(pad) == 2:
+                    padding = [0, 0, 0, 0]
+                    try:
+                        if len(pad[0]) == 2:
+                            padding[0] = pad[0][0]
+                            padding[1] = pad[0][1]
+                        elif len(pad[0]) == 1:
+                            padding[0] = pad[0][0]
+                            padding[1] = pad[0][0]
+                        elif len(pad[0]) == 0:
+                            padding[0] = 0
+                            padding[1] = 0
+                        else:
+                            raise ValueError(
+                                "Unsupported Keras ZeroPadding2D: %s" % pad)
+                    except TypeError:
+                        if int(pad[0]) != pad[0]:
+                            raise ValueError(
+                                "Unsupported Keras ZeroPadding2D: %s" % pad)
+                        padding[0] = int(pad[0])
+                        padding[1] = int(pad[0])
+                    try:
+                        if len(pad[1]) == 2:
+                            padding[2] = pad[1][0]
+                            padding[3] = pad[1][1]
+                        elif len(pad[1]) == 1:
+                            padding[2] = pad[1][0]
+                            padding[3] = pad[1][0]
+                        elif len(pad[1]) == 0:
+                            padding[2] = 0
+                            padding[3] = 0
+                        else:
+                            raise ValueError(
+                                "Unsupported Keras ZeroPadding2D: %s" % pad)
+                    except TypeError:
+                        if int(pad[1]) != pad[1]:
+                            raise ValueError(
+                                "Unsupported Keras ZeroPadding2D: %s" % pad)
+                        padding[2] = int(pad[1])
+                        padding[3] = int(pad[1])
+                elif len(pad) == 1:
+                    if int(pad[0]) != pad[0]:
+                        raise ValueError(
+                            "Unsupported Keras ZeroPadding2D: %s" % pad)
+                    padding = [0, 0, 0, 0]
+                elif len(pad) == 0:
+                    padding = [0, 0, 0, 0]
+                else:
+                    raise ValueError(
+                        "Unsupported Keras ZeroPadding2D: %s" % pad)
+            except TypeError:
+                if int(pad) != pad:
+                    raise ValueError(
+                        "Unsupported Keras ZeroPadding2D: %s" % pad)
+                padding = [int(pad), int(pad), int(pad), int(pad)]
             top_map[layer_name] = up_node
             continue
         elif layer_type == 'Merge':
@@ -291,7 +346,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 param.num_output = config['filters']
             param.kernel_size = (config['kernel_size'][1],
                                  config['kernel_size'][0])
-            param.pad = get_padding()
+            param.pad_lrtb = get_padding()
             param.keras_padding = config['padding']
             param.stride = (config['strides'][1], config['strides'][0])
             if (layer_type == 'DepthwiseConv2D' or
@@ -334,7 +389,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             if layer_type in ('MaxPooling2D', 'AveragePooling2D'):
                 param.kernel_size = (config['pool_size'][1],
                                      config['pool_size'][0])
-                param.pad = get_padding()
+                param.pad_lrtb = get_padding()
                 param.keras_padding = config['padding']
                 param.stride = (config['strides'][1], config['strides'][0])
             else:

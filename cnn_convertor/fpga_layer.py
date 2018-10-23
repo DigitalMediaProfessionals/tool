@@ -19,7 +19,7 @@ import math
 import logging
 import numpy as np
 from cnn_convertor import cnn_layer, cnn_exception, cnn_docgen
-from cnn_convertor.cnn_layer import NodeType
+from cnn_convertor.cnn_layer import NodeType, get_conv_out_width
 from enum import IntEnum, auto
 
 
@@ -79,10 +79,6 @@ def divup(a, b):
     return n
 
 
-def get_conv_out_width(width, kx, pad, stride):
-    return (pad + width + pad - kx) // stride + 1
-
-
 def calc_conv_tiles(node):
     if node.param.group > 1:
         return 1
@@ -91,15 +87,15 @@ def calc_conv_tiles(node):
     c = node.input_dim[2]
     m = node.output_dim[2]
     p = node.param.kernel_size[0]
-    pad = node.param.pad
+    pad_lrtb = node.param.pad_lrtb
     stride = node.param.stride
     c_blocks = (c >> 3) + (1 if c & 7 else 0)
     t = 0
     while True:
         t += 1
         tw = divup(w, t) + p - 1  # width of tile
-        ow = get_conv_out_width(tw, p, pad[0], stride[0])
-        oh = get_conv_out_width(h, p, pad[1], stride[1])
+        ow = get_conv_out_width(tw, p, pad_lrtb[0], pad_lrtb[1], stride[0])
+        oh = get_conv_out_width(h, p, pad_lrtb[2], pad_lrtb[3], stride[1])
         os = ow * oh * min(8, m)  # output buffer size
         ts_1c = tw * h  # tile size for single channel
         ts_blk16 = ts_1c * min(8, c)
@@ -155,7 +151,7 @@ def merge_bn_scale(node, kernel_size, n_c, n_m):
     e = 0.00001
     weight.shape = (n_m, n_c * kernel_size[1] * kernel_size[0])
     for i in range(n_m):
-        norm = sc_weight[i] / math.sqrt(bn_var[i] + e)
+        norm = sc_weight[i] / math.sqrt(np.fabs(bn_var[i]) + e)
         weight[i, :] = weight[i, :] * norm
         bias[i] = (bias[i] - bn_mean[i]) * norm + sc_bias[i]
     weight.shape = (-1,)
@@ -523,7 +519,7 @@ def gen_source_header(of, name, net):
 
 def gen_source_conv(of, name, n, layer, quantization):
     global weight_offset
-    global is_tensorflow
+
     of.write('//Layer_{0}: Convolution Layer\n'.format(n))
     layer_names = []
     for run in layer.run:
@@ -582,19 +578,15 @@ def gen_source_conv(of, name, n, layer, quantization):
         else:
             p = 1
             conv_enable = 0
-        conv_pad = (run.conv.param.pad[0] | (
-            run.conv.param.pad[1] << 16) if is_conv else 0)
-        conv_pad |= conv_pad << 8
-        conv_stride = (run.conv.param.stride[0] | (
-            run.conv.param.stride[1] << 8) if is_conv else 0x101)
+        conv_pad = run.conv.param.pad_fpga if is_conv else 0
+        conv_stride = (run.conv.param.stride[0] |
+                       (run.conv.param.stride[1] << 8) if is_conv else 0x0101)
         pool_enable = (1 if run.pool else 0)
         pool_size = (run.pool.param.kernel_size[0] | (
             run.pool.param.kernel_size[1] << 8) if run.pool else 0)
         pool_stride = (run.pool.param.stride[0] | (
             run.pool.param.stride[1] << 8) if run.pool else 0x101)
-        pool_pad = (run.pool.param.pad[0] | (
-            run.pool.param.pad[1] << 16) if run.pool else 0)
-        pool_pad |= pool_pad << 8
+        pool_pad = run.pool.param.pad_fpga if run.pool else 0
         actfunc = 0
         actparam = 0
         pool_avg_param = 0
@@ -611,9 +603,13 @@ def gen_source_conv(of, name, n, layer, quantization):
                  node_out.param.pool != 0) or
                     node_out.type is NodeType.Eltwise):
                 pool_enable = 2
-                pool_avg_param = np.float16(
-                    1.0 / (run.pool.param.kernel_size[0] *
-                           run.pool.param.kernel_size[1])).view(np.uint16)
+                if run.pool.param.split_pool_divisor is None:
+                    pool_avg_param = np.float16(
+                        1.0 / (run.pool.param.kernel_size[0] *
+                               run.pool.param.kernel_size[1])).view(np.uint16)
+                else:
+                    pool_avg_param = np.float16(
+                        1.0 / run.pool.param.split_pool_divisor).view(np.uint16)
             if node_out.type is NodeType.UpSampling:
                 pool_enable = 4
             if node_out.type is NodeType.Power:
@@ -621,19 +617,7 @@ def gen_source_conv(of, name, n, layer, quantization):
                 pool_avg_param = np.float16(
                     node_out.param.scale).view(np.uint16)
         m = node_out.output_dim[2]
-        # adjust pad size if backend was tensorflow
-        if is_tensorflow:
-            if run.conv is not None:
-                if ((conv_pad & 0xFF) * 2 + run.conv.input_dim[0] - p) > (run.conv.output_dim[0] - 1) * (conv_stride & 0xFF):
-                    conv_pad -= 1
-                if (((conv_pad & 0xFF0000) >> 16) * 2 + run.conv.input_dim[1] - p) > (run.conv.output_dim[1] - 1) * ((conv_stride & 0xFF00) >> 8):
-                    conv_pad -= 0x10000
-            if run.pool is not None and run.pool.type is NodeType.Pooling:
-                if ((pool_pad & 0xFF) * 2 + run.pool.input_dim[0] - run.pool.param.kernel_size[0]) > (run.pool.output_dim[0] - 1) * (pool_stride & 0xFF):
-                    pool_pad -= 1
-                if (((pool_pad & 0xFF0000) >> 16) * 2 + run.pool.input_dim[1] - run.pool.param.kernel_size[1]) > (run.pool.output_dim[1] - 1) * ((pool_stride & 0xFF00) >> 8):
-                    pool_pad -= 0x10000
-        # detect if this is the case of pool node being merged into concat node
+        # Detect if this is the case of pool node being merged into concat node
         if node_in != node_out and node_in not in node_out.input_nodes:
             m = node_in.output_dim[2]
         of.write('  //--------------------------------------------------\n')
@@ -663,7 +647,7 @@ def gen_source_conv(of, name, n, layer, quantization):
         of.write('  conf.run[{0}].pool_size = 0x{1:X};  // bits [7:0] = width, bits [15:8] = height\n'.format(i, pool_size))
         of.write('  conf.run[{0}].pool_stride = 0x{1:X};  // bits [7:0] = X stride, bits [15:8] = Y stride\n'.format(i, pool_stride))
         of.write('  conf.run[{0}].pool_pad = 0x{1:X};  // bits [7:0] = left padding, bits [15:8] = right padding, bits [23:16] = top padding, bits [31:24] = bottom padding\n'.format(i, pool_pad))
-        of.write('  conf.run[{0}].pool_avg_param = 0x{1:X};  // Must be set to 1/pool_size^2 in FP16 format when using average pooling (average pooling assumes square size)\n'.format(i, pool_avg_param))
+        of.write('  conf.run[{0}].pool_avg_param = 0x{1:X};  // Usually set to 1/pool_size^2 in FP16 format when using average pooling (average pooling assumes square size)\n'.format(i, pool_avg_param))
         of.write('  conf.run[{0}].actfunc = {1};  // Activation Function: 0 = None, 1 = Tanh, 2 = Leaky ReLU, 3 = Sigmoid, 4 = PReLU, 5 = ELU, 6 = ReLU6\n'.format(i, actfunc))
         of.write('  conf.run[{0}].actfunc_param = 0x{1:X};  // Leaky ReLU parameter (NOTE: 0x2E66 is 0.1 in FP16)\n'.format(i, actparam))
         of.write('  conf.run[{0}].rectifi_en = 0;  // Rectification, i.e. max(0, x) (NOTE: Can be applied after non-ReLU activation function)\n'.format(i))
