@@ -476,10 +476,7 @@ class Network(object):
             # Set it here
             dim = node.input_nodes[0].output_dim
             if node.param.num_output == 0:
-                try:
-                    node.param.num_output = dim[-1] * node.param.group
-                except IndexError:
-                    print("Got index error")
+                node.param.num_output = dim[-1] * node.param.group
                 node.param.group = dim[-1]
             if node.type == NodeType.Convolution:
                 node.set_input_dim(dim)
