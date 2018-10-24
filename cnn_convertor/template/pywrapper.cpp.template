@@ -100,16 +100,17 @@ void put_input(net_id id, const np::ndarray & input)
 /**
  * @brief get output of the CNet
  * @param[in] id ID of CNet network
+ * @param[in] index index of output
  *
  * @return boost::python::numpy::ndarray An output from CNet network.
  */
-np::ndarray get_final_output(net_id id)
+np::ndarray get_final_output(net_id id, int index)
 {
 	CNet * net = nets[id];
 
 	// get output
 	vector<float> * output = new std::vector<float>();
-	net->get_final_output(*output);
+	net->get_final_output(*output, index);
 
 	// convert the vector to ndarray
 	static const np::dtype ftdt = np::dtype::get_builtin<float>();
