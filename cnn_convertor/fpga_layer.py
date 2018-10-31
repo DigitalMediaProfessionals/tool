@@ -359,10 +359,6 @@ def pack_fc_weight(node, conv_node, of, quantization):
     else:
         labels = node.weight.astype(np.float16)
     bias16 = node.bias.astype(np.float16)
-    if node.act_node and node.act_node.type == NodeType.PReLU:
-        prelu16 = node.act_node.weight.astype(np.float16)
-    else:
-        prelu16 = None
 
     offs = 0
     if quantization:
@@ -399,15 +395,6 @@ def pack_fc_weight(node, conv_node, of, quantization):
         logging.info("Added %d zeros to align bias size", 16 - d)
         np.zeros(16 - d, dtype=np.uint8).tofile(of)
         offs += 16 - d
-
-    if prelu16 is not None:
-        prelu16.tofile(of)
-        offs += prelu16.nbytes
-        d = offs & 15  # add 0 padding so prelu size will be 16-bytes aligned
-        if d:
-            logging.info("Added %d zeros to align prelu size", 16 -d)
-            np.zeros(16 - d, dtype=np.uint8).tofile(of)
-            offs += 16 - d
 
 
 def get_weight_size(node, quantization):
@@ -450,10 +437,6 @@ def get_fc_weight_size(node, quantization):
     size = (size + 0xf) & (~0xf)  # align to 16 bytes
     size += m * 2
     size = (size + 0xf) & (~0xf)  # align to 16 bytes
-    # add PReLU parameter size
-    if node.act_node and node.act_node.type == NodeType.PReLU:
-        size += m * 2
-        size = (size + 0xf) & (~0xf)  # align to 16 bytes
     return size
 
 
@@ -722,8 +705,6 @@ def gen_source_fc(of, name, n, layer, quantization):
             actfunc = 2
         elif node.act_node.type == NodeType.Sigmoid:
             actfunc = 4
-        elif node.act_node.type == NodeType.PReLU:
-            actfunc = 5
         else:
             raise ValueError("Unsupported activation: %s" % node.act_node.type)
     of.write('// Layer_{0}: Fully Connected Layer\n'.format(n))
