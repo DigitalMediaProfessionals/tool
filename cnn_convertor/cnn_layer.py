@@ -361,7 +361,7 @@ class Network(object):
         param = NodeParam()
         param.pool = node.param.pool
         param.kernel_size = (remain_w, remain_h)
-        param.stride = node.param.stride
+        param.stride = (remain_w, remain_h)
         param.split_pool_divisor = remaining_divisor
         remain_node.set_param(param)
         node.param.kernel_size = (split_w, split_h)
