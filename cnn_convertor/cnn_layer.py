@@ -427,6 +427,9 @@ class Network(object):
                 assert get_conv_out_width(
                         h, param.kernel_size[1], param.pad_lrtb[2],
                         param.pad_lrtb[3], param.stride[1]) == oh
+            elif param.keras_padding == "causal":
+                # TODO: dilation is ignored for now
+                param.pad_lrtb[0] += param.kernel_size[0] - 1
 
             ow = (float(param.pad_lrtb[0] + w + param.pad_lrtb[1] -
                         param.kernel_size[0]) / param.stride[0]) + 1

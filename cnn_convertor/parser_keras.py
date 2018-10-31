@@ -76,6 +76,8 @@ def get_weights(netweight, layer_name, need_flip, weight_entry):
                 if need_flip:
                     new_shape = (w.shape[0], w.shape[1], -1)
                     w = np.flip(w.reshape(new_shape), 2)
+            if len(shape) == 3:
+                w = np.transpose(w, (2, 1, 0))
             if len(shape) == 2:
                 w = np.transpose(w)
             w = w.reshape((-1,))
@@ -87,17 +89,25 @@ def get_weights(netweight, layer_name, need_flip, weight_entry):
 
 def parse_keras_network2(network, net_def, netweight, need_flip=False):
     type_map = {
+        'Conv1D': NodeType.Convolution,
         'Conv2D': NodeType.Convolution,
+        'DepthwiseConv1D': NodeType.Convolution,
         'DepthwiseConv2D': NodeType.Convolution,
+        'SeparableConv1D': NodeType.Convolution,
         'SeparableConv2D': NodeType.Convolution,
         'Dense': NodeType.InnerProduct,
         'LRN': NodeType.LRN,
         'Concatenate': NodeType.Concat,
         'Add': NodeType.Eltwise,
+        'MaxPooling1D': NodeType.Pooling,
         'MaxPooling2D': NodeType.Pooling,
+        'AveragePooling1D': NodeType.Pooling,
         'AveragePooling2D': NodeType.Pooling,
+        'GlobalMaxPooling1D': NodeType.Pooling,
+        'GlobalAveragePooling1D': NodeType.Pooling,
         'GlobalMaxPooling2D': NodeType.Pooling,
         'GlobalAveragePooling2D': NodeType.Pooling,
+        'UpSampling1D': NodeType.UpSampling,
         'UpSampling2D': NodeType.UpSampling,
         'InputLayer': NodeType.Input,
         'Softmax': NodeType.SoftMax,
@@ -125,6 +135,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
     prev_node = None
     # Handle each layer node
     parsed_nodes = []
+    global padding
     for i, layer in enumerate(layers):
         layer_type = layer['class_name']
         config = layer['config']
@@ -138,10 +149,17 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             prev_node = node
             network.append_input_node(node)
             shape = config['batch_input_shape']
-            if is_channel_first:
-                dim = (shape[3], shape[2], shape[1])
+            # handle 1D input dimensions
+            if len(shape) == 3:
+                if is_channel_first:
+                    dim = (shape[2], 1, shape[1])
+                else:
+                    dim = (shape[1], 1, shape[2])
             else:
-                dim = (shape[2], shape[1], shape[3])
+                if is_channel_first:
+                    dim = (shape[3], shape[2], shape[1])
+                else:
+                    dim = (shape[2], shape[1], shape[3])
             node.set_input_dim(dim)
             node.set_output_dim(dim)
         if is_sequential:
@@ -217,9 +235,34 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 node.set_weight_bias(weights[0], weights[1])
             top_map[layer_name] = up_node
             continue
+        elif layer_type == 'ZeroPadding1D':
+            # there is no padding layer if caffe so just extract padding info
+            pad = config['padding']
+            try:
+                if len(pad) == 2:
+                    if not all(int(x) == x for x in pad):
+                        raise ValueError(
+                            "Unsupported Keras ZeroPadding1D: %s" % pad)
+                    padding = [int(pad[0]), int(pad[1]), 0, 0]
+                elif len(pad) == 1:
+                    if int(pad[0]) != pad[0]:
+                        raise ValueError(
+                            "Unsupported Keras ZeroPadding1D: %s" % pad)
+                    padding = [int(pad[0])] * 4
+                elif len(pad) == 0:
+                    padding = [0, 0, 0, 0]
+                else:
+                    raise ValueError(
+                        "Unsupported Keras ZeroPadding2D: %s" % pad)
+            except TypeError:
+                if int(pad) != pad:
+                    raise ValueError(
+                        "Unsupported Keras ZeroPadding2D: %s" % pad)
+                padding = [int(pad)] * 4
+            top_map[layer_name] = up_node
+            continue
         elif layer_type == 'ZeroPadding2D':
             # there is no padding layer if caffe so just extract padding info
-            global padding
             pad = config['padding']
             try:
                 if len(pad) == 4:
@@ -331,26 +374,40 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
         if node_type == NodeType.Input:
             network.append_input_node(node)
             shape = config['batch_input_shape']
-            if is_channel_first:
-                dim = (shape[3], shape[2], shape[1])
+            # handle 1D input dimensions
+            if len(shape) == 3:
+                if is_channel_first:
+                    dim = (shape[2], 1, shape[1])
+                else:
+                    dim = (shape[1], 1, shape[2])
             else:
-                dim = (shape[2], shape[1], shape[3])
+                if is_channel_first:
+                    dim = (shape[3], shape[2], shape[1])
+                else:
+                    dim = (shape[2], shape[1], shape[3])
             node.set_input_dim(dim)
             node.set_output_dim(dim)
         elif node_type == NodeType.Convolution:
+            is_1D = (layer_type[-2] == '1')
             param = cnn_layer.NodeParam()
             # For keras, output is not set for depthwise convolution
             # skip setting num_output and set it when calculating in_out sizes
-            if (layer_type != 'DepthwiseConv2D' and
-                    layer_type != 'SeparableConv2D'):
+            if (layer_type[:-2] != 'DepthwiseConv' and
+                    layer_type[:-2] != 'SeparableConv'):
                 param.num_output = config['filters']
-            param.kernel_size = (config['kernel_size'][1],
-                                 config['kernel_size'][0])
+            if is_1D:
+                param.kernel_size = (config['kernel_size'][0], 1)
+            else:
+                param.kernel_size = (config['kernel_size'][1],
+                                     config['kernel_size'][0])
             param.pad_lrtb = get_padding()
             param.keras_padding = config['padding']
-            param.stride = (config['strides'][1], config['strides'][0])
-            if (layer_type == 'DepthwiseConv2D' or
-                    layer_type == 'SeparableConv2D'):
+            if is_1D:
+                param.stride = (config['strides'][0], 1)
+            else:
+                param.stride = (config['strides'][1], config['strides'][0])
+            if (layer_type[:-2] == 'DepthwiseConv' or
+                    layer_type[:-2] == 'SeparableConv'):
                 param.group = config['depth_multiplier']
                 if param.group > 1:
                     logging.error('Depthwise/Separable Convolution with'
@@ -358,7 +415,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     raise cnn_exception.ParseError('Unsupported param')
             node.set_param(param)
 
-            if layer_type == 'SeparableConv2D':
+            if layer_type[:-2] == 'SeparableConv':
                 point_node = cnn_layer.LayerNode(layer_name + '_point',
                                                  node_type, node)
                 prev_node = point_node
@@ -370,7 +427,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             if config['activation'] != 'linear':
                 set_inplace_node(prev_node, config)
             if netweight is not None:
-                if layer_type == 'SeparableConv2D':
+                if layer_type[:-2] == 'SeparableConv':
                     weights = get_weights(netweight, layer_name, need_flip,
                                           ['depthwise_kernel',
                                            'pointwise_kernel', 'bias'])
@@ -382,10 +439,16 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     node.set_weight_bias(weights[0], weights[1])
         elif node_type == NodeType.Pooling:
             param = cnn_layer.NodeParam()
-            if layer_type in ('MaxPooling2D', 'GlobalMaxPooling2D'):
+            if layer_type in ('MaxPooling1D', 'MaxPooling2D',
+                              'GlobalMaxPooling1D', 'GlobalMaxPooling2D'):
                 param.pool = 0
             else:
                 param.pool = 1
+            if layer_type in ('MaxPooling1D', 'AveragePooling1D'):
+                param.kernel_size = (config['pool_size'][0], 1)
+                param.pad_lrtb = get_padding()
+                param.keras_padding = config['padding']
+                param.stride = (config['strides'][0], 1)
             if layer_type in ('MaxPooling2D', 'AveragePooling2D'):
                 param.kernel_size = (config['pool_size'][1],
                                      config['pool_size'][0])
@@ -396,8 +459,12 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 param.is_global = True
             node.set_param(param)
         elif node_type == NodeType.UpSampling:
+            is_1D = (layer_type[-2] == '1')
             param = cnn_layer.NodeParam()
-            param.kernel_size = (config['size'][1], config['size'][0])
+            if is_1D:
+                param.kernel_size = (config['size'][0], 1)
+            else:
+                param.kernel_size = (config['size'][1], config['size'][0])
             node.set_param(param)
         elif node_type == NodeType.InnerProduct:
             param = cnn_layer.NodeParam()
