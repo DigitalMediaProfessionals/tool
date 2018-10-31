@@ -449,7 +449,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 param.pad_lrtb = get_padding()
                 param.keras_padding = config['padding']
                 param.stride = (config['strides'][0], 1)
-            if layer_type in ('MaxPooling2D', 'AveragePooling2D'):
+            elif layer_type in ('MaxPooling2D', 'AveragePooling2D'):
                 param.kernel_size = (config['pool_size'][1],
                                      config['pool_size'][0])
                 param.pad_lrtb = get_padding()
