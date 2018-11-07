@@ -277,25 +277,16 @@ class Network(object):
     def append_output_node(self, node):
         self.output_nodes.append(node)
 
-    def split_pool_node(self, node, level=0, remaining_divisor=None):
-        # Only handle case where kernel_size[0] and [1] are equal now
-        if node.param.kernel_size[0] != node.param.kernel_size[1]:
-            raise cnn_exception.ConvertError(
-                "Support for pooling size %dx%d is not implemented" %
-                (node.param.kernel_size[0], node.param.kernel_size[1]))
-        if (not node.param.is_global and
-                (node.param.stride[0] != node.param.kernel_size[0] or
-                 node.param.stride[1] != node.param.kernel_size[1])):
-            raise cnn_exception.ConvertError(
-                "Support for pooling size %dx%d with stride %dx%d "
-                "is not implemented" %
-                (node.param.kernel_size[0], node.param.kernel_size[1],
-                 node.param.stride[0], node.param.stride[1]))
-        candidates = [7, 6, 5, 4, 3, 2]
-        insert_index = self.traverse_list.index(node) + 1
+    def _get_split_size(self, node, kernel_size):
+        if kernel_size == 1:
+            return 1, 0
+        if node.param.pool == 0:    # max pooling
+            candidates = [3, 2]
+        else:   # avg pooling
+            candidates = [7, 6, 5, 4, 3, 2]
         split_size = 0
         kernel_padding = 0
-        for _i in range(7):
+        for _i in range(candidates[0] - 1):
             for c in candidates:
                 if (node.param.kernel_size[0] + kernel_padding) % c == 0:
                     split_size = c
@@ -315,24 +306,38 @@ class Network(object):
             raise cnn_exception.ConvertError(
                 "Possible implementation error detected: "
                 "control should not reach this line")
+        return split_size, kernel_padding
+
+    def split_pool_node(self, node, level=0, remaining_divisor=None):
+        if (not node.param.is_global and
+                (node.param.stride[0] != node.param.kernel_size[0] or
+                 node.param.stride[1] != node.param.kernel_size[1])):
+            raise cnn_exception.ConvertError(
+                "Support for pooling size %dx%d with stride %dx%d "
+                "is not implemented" %
+                (node.param.kernel_size[0], node.param.kernel_size[1],
+                 node.param.stride[0], node.param.stride[1]))
+
+        insert_index = self.traverse_list.index(node) + 1
+        split_w, pad_w = self._get_split_size(node, node.param.kernel_size[0])
+        split_h, pad_h = self._get_split_size(node, node.param.kernel_size[1])
 
         if level == 0:
             assert node.param.split_pool_divisor is None and \
                 remaining_divisor is None
             remaining_divisor = (node.param.kernel_size[0] *
-                                 node.param.kernel_size[0])
-        node.param.split_pool_divisor = split_size * split_size
+                                 node.param.kernel_size[1])
+        node.param.split_pool_divisor = split_w * split_h
         remaining_divisor /= node.param.split_pool_divisor
-
-        remain_size = (node.param.kernel_size[0] +
-                       kernel_padding) // split_size
+        remain_w = (node.param.kernel_size[0] + pad_w) // split_w
+        remain_h = (node.param.kernel_size[1] + pad_h) // split_h
 
         mx, my = 1, 1
         while mx or my:
             dx, mx = divmod(node.param.pad_lrtb[0] + node.input_dim[0] +
-                            node.param.pad_lrtb[1], split_size)
-            dy, my = divmod(node.param.pad_lrtb[2] + node.input_dim[0] +
-                            node.param.pad_lrtb[3], split_size)
+                            node.param.pad_lrtb[1], split_w)
+            dy, my = divmod(node.param.pad_lrtb[2] + node.input_dim[1] +
+                            node.param.pad_lrtb[3], split_h)
             if mx:
                 node.param.pad_lrtb[1] += 1
             if my:
@@ -340,14 +345,14 @@ class Network(object):
 
         remain_dim = (dx, dy, node.input_dim[2])
 
-        remain_node = LayerNode(node.name + '_' + str(remain_size),
-                                NodeType.Pooling)
+        remain_node = LayerNode(node.name + '_' + str(remain_w) + '_'
+                                + str(remain_h), NodeType.Pooling)
         remain_node.input_nodes = [node]
         remain_node.output_nodes = node.output_nodes
         for node_out in node.output_nodes:
             node_out.input_nodes = [remain_node]
         node.output_nodes = [remain_node]
-        node.name = node.name + '_' + str(split_size)
+        node.name = node.name + '_' + str(split_w) + '_' + str(split_h)
 
         remain_node.input_dim = remain_dim
         remain_node.set_output_dim(node.output_dim)
@@ -355,16 +360,20 @@ class Network(object):
 
         param = NodeParam()
         param.pool = node.param.pool
-        param.kernel_size = (remain_size, remain_size)
-        param.stride = node.param.stride
+        param.kernel_size = (remain_w, remain_h)
+        param.stride = (remain_w, remain_h)
         param.split_pool_divisor = remaining_divisor
         remain_node.set_param(param)
-        node.param.kernel_size = (split_size, split_size)
-        node.param.stride = (split_size, split_size)
+        node.param.kernel_size = (split_w, split_h)
+        node.param.stride = (split_w, split_h)
 
         self.traverse_list.insert(insert_index, remain_node)
 
-        if remain_size > 7:
+        if node.param.pool == 0:    # max pooling
+            kernel_size_limit = 3
+        else:   # avg pooling
+            kernel_size_limit = 7
+        if remain_w > kernel_size_limit or remain_h > kernel_size_limit:
             self.split_pool_node(remain_node, level + 1, remaining_divisor)
 
     def insert_flatten_node(self, node, dim):
@@ -427,6 +436,9 @@ class Network(object):
                 assert get_conv_out_width(
                         h, param.kernel_size[1], param.pad_lrtb[2],
                         param.pad_lrtb[3], param.stride[1]) == oh
+            elif param.keras_padding == "causal":
+                # TODO: dilation is ignored for now
+                param.pad_lrtb[0] += param.kernel_size[0] - 1
 
             ow = (float(param.pad_lrtb[0] + w + param.pad_lrtb[1] -
                         param.kernel_size[0]) / param.stride[0]) + 1
@@ -498,9 +510,13 @@ class Network(object):
                 else:
                     dim = get_output_xy(dim, node.param, True) + (dim[2],)
                 node.set_output_dim(dim)
-                # split pool node if kernel size > 7
-                if (node.param.kernel_size[0] > 7 or
-                        node.param.kernel_size[1] > 7):
+                if node.param.pool == 0:    # max pooling
+                    kernel_size_limit = 3
+                else:   # avg pooling
+                    kernel_size_limit = 7
+                # split pool node if kernel size > limit
+                if (node.param.kernel_size[0] > kernel_size_limit or
+                        node.param.kernel_size[1] > kernel_size_limit):
                     self.split_pool_node(node)
             elif node.type == NodeType.UpSampling:
                 node.set_input_dim(dim)
