@@ -32,14 +32,7 @@ sess = tf.Session(config=config)
 set_session(sess)  # set this TensorFlow session as the default session for Keras
 
 
-globs = globals()  # All layers.
-globs['Model'] = models.Model
-globs['Sequential'] = models.Sequential
-custom_objects = {'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}
-
-globs['Conv2D']= layers.Conv2D
-globs['relu6']=keras.applications.mobilenet.relu6
-globs['DepthwiseConv2D']=keras.applications.mobilenet.DepthwiseConv2D
+custom_objects = {'relu6': keras.layers.ReLU(6.),'DepthwiseConv2D': keras.layers.DepthwiseConv2D}
 
 
 def remap(arr, dim):
@@ -81,6 +74,11 @@ layer_files = glob.glob(layers_folder+'/*')
 keras_files = glob.glob(keras_outputs_folder+'/*')
 keras_input = np.load(network_debug_folder+'input.npy')
 fpga_files = glob.glob(fpga_outputs_folder+'/*')
+
+layer_files = sorted(layer_files)
+keras_files = sorted(keras_files)
+fpga_files = sorted(fpga_files)
+
 fpga_regex = "layer_input.bin$"
 r=re.compile(fpga_regex)
 fpga_input_file = list(filter(lambda x: r.search(x), fpga_files))
@@ -143,7 +141,7 @@ for i, layer in enumerate(layers.items()):
             layer_input=[fpga_outputs[i-1]]
             
 
-    with CustomObjectScope({'relu6': relu6}):
+    with CustomObjectScope(custom_objects):
         keras_model = load_model(layer_file)
     try:
         layer_predict = keras_model.predict(layer_input)
