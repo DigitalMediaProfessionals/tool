@@ -215,13 +215,16 @@ if args.image_labels==1:
 	labels=[]
 	for imagefile in image_files:
 		labels.append(int(re.search(r'\d*(?=(.jpg|.png))',imagefile)[0]))
-keras_data={}
-fpga_data={}
+
+result_data={}
+
+
+
 
 for subfolder in list(fpga_files_dict.keys()):
 	# subfolder_summary[subfolder]=dict.fromkeys([1, 2, 3, 4])
-	keras_data[subfolder]=[]
-	fpga_data[subfolder]=[]
+	result_data[subfolder]=dict([('total',[]),(50,{}), (60,{}),(70,{}),(75,{}),(80,{}),(85,{}),(90,{}),(95,{})])
+
 	if len(fpga_files_dict[subfolder])!=len(keras_files):
 		next
 	else:
@@ -241,36 +244,43 @@ for subfolder in list(fpga_files_dict.keys()):
 
 		for i in range(len(keras_files)):
 			# fpganame=ntpath.basename(fpga_files[i])
-			kerasname=ntpath.basename(keras_files[i])
-			
-			keras_data[subfolder].append(np.squeeze(np.load(keras_files[i])))
-			fpga_data[subfolder].append(np.fromfile(fpga_files[i], dtype=np.float32))
 
-			fpga_top3_index=fpga_data[subfolder][-1].argsort()[-3:][::-1]
+			result_data[subfolder]['total'].append(dict.fromkeys(['filename','cpu_data', 'fpga_data', 'cpu_result', 'fpga_result', 'fpga_cpu_match',
+			 'cpu_confidence', 'fpga_confidence', 'result_error', 'abs_result_error', 'top3_similarity', 'top3_match']))
+
+			subfolder_image_total=result_data[subfolder]['total'][-1]
+
+			
+			
+			subfolder_image_total['cpu_data'] = np.squeeze(np.load(keras_files[i]))
+			subfolder_image_total['fpga_data'] = np.fromfile(fpga_files[i], dtype=np.float32)
+
+			cpu_top3_index=subfolder_image_total['cpu_data'].argsort()[-3:][::-1]
+			cpu_top3_score=[]
+			for index in cpu_top3_index:
+				cpu_top3_score.append(subfolder_image_total['cpu_data'][index])
+
+			fpga_top3_index=subfolder_image_total['fpga_data'].argsort()[-3:][::-1]
 			fpga_top3_score=[]
 			for index in fpga_top3_index:
-				fpga_top3_score.append(fpga_data[subfolder][-1][index])
-			
-			keras_top3_index=keras_data[subfolder][-1].argsort()[-3:][::-1]
-			keras_top3_score=[]
-			for index in keras_top3_index:
-				keras_top3_score.append(keras_data[subfolder][-1][index])
-			
+				fpga_top3_score.append(subfolder_image_total['fpga_data'][index])
+
 			titles=['No.','Filename', 'CPU Result','FPGA Result', 'FPGA-CPU Match','CPU Confidence', 'FPGA Confidence', 'Result Error%', 'Abs Result Error%','Top 3 Similarity','Top 3 Match Order']
 
-			filename=kerasname[:-4]
-			cpu_result=keras_top3_index[0]
-			fpga_result=fpga_top3_index[0]
-			fpga_cpu_match = str(1) if keras_top3_index[0]==fpga_top3_index[0] else str(0)
-			cpu_confidence=keras_top3_score[0]
-			fpga_confidence=fpga_top3_score[0]
-			result_error=100*(fpga_top3_score[0] - keras_top3_score[0])/fpga_top3_score[0] if keras_top3_index[0]==fpga_top3_index[0] else 'N/A'
-			abs_result_error=np.abs(100*(fpga_top3_score[0] - keras_top3_score[0])/fpga_top3_score[0]) if keras_top3_index[0]==fpga_top3_index[0] else 'N/A'
-			top3_similarity=str(len(np.intersect1d(keras_top3_index,fpga_top3_index)))
-			top3_match=str(sum(keras_top3_index==fpga_top3_index))
+			subfolder_image_total['filename']=ntpath.basename(keras_files[i])[:-4]
+			subfolder_image_total['cpu_result']=cpu_top3_index[0]
+			subfolder_image_total['fpga_result']=fpga_top3_index[0]
+			subfolder_image_total['fpga_cpu_match'] = str(1) if cpu_top3_index[0]==fpga_top3_index[0] else str(0)
+			subfolder_image_total['cpu_confidence']=cpu_top3_score[0]
+			subfolder_image_total['fpga_confidence']=fpga_top3_score[0]
+			subfolder_image_total['result_error']=100*(fpga_top3_score[0] - cpu_top3_score[0])/fpga_top3_score[0] if cpu_top3_index[0]==fpga_top3_index[0] else 'N/A'
+			subfolder_image_total['abs_result_error']=np.abs(100*(fpga_top3_score[0] - cpu_top3_score[0])/fpga_top3_score[0]) if cpu_top3_index[0]==fpga_top3_index[0] else 'N/A'
+			subfolder_image_total['top3_similarity']=str(len(np.intersect1d(cpu_top3_index,fpga_top3_index)))
+			subfolder_image_total['top3_match']=str(sum(cpu_top3_index==fpga_top3_index))
 
-			excel_row = [str(i), filename,cpu_result,fpga_result, fpga_cpu_match, cpu_confidence, fpga_confidence, 
-			result_error, abs_result_error, top3_similarity, top3_match]
+			excel_row = [str(i), subfolder_image_total['filename'],subfolder_image_total['cpu_result'],subfolder_image_total['fpga_result'], subfolder_image_total['fpga_cpu_match'], 
+			subfolder_image_total['cpu_confidence'], subfolder_image_total['fpga_confidence'], subfolder_image_total['result_error'], 
+			subfolder_image_total['abs_result_error'], subfolder_image_total['top3_similarity'], subfolder_image_total['top3_match']]
 
 
 			if args.image_labels==1:
@@ -281,9 +291,9 @@ for subfolder in list(fpga_files_dict.keys()):
 				# 	print(fpganame)
 				# 	break
 				excel_row.append(categories[label])
-				excel_row.append(categories[keras_top3_index[0]])
+				excel_row.append(categories[cpu_top3_index[0]])
 				excel_row.append(categories[fpga_top3_index[0]])
-				excel_row.append(str(1) if keras_top3_index[0]==label else str(0))
+				excel_row.append(str(1) if cpu_top3_index[0]==label else str(0))
 				excel_row.append(str(1) if fpga_top3_index[0]==label else str(0))
 
 			
