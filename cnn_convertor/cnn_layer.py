@@ -49,6 +49,7 @@ class NodeType(IntEnum):
     Custom = auto()
     ELU = auto()
     Sigmoid = auto()
+    ReLU6 = auto()
 
     def __repr__(self):
         return '<%s.%s>' % (self.__class__.__name__, self.name)

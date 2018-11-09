@@ -63,7 +63,8 @@ def get_actfunc(tpe):
         NodeType.TanH: 1,
         NodeType.Sigmoid: 3,
         NodeType.PReLU: 4,
-        NodeType.ELU: 5}.get(tpe, 2)
+        NodeType.ELU: 5,
+        NodeType.ReLU6: 6}.get(tpe, 2)
 
 
 def make_align_size(size):

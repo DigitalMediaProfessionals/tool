@@ -183,7 +183,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             if activation == 'softmax':
                 node_type = NodeType.SoftMax
             else:
-                if activation == 'relu' or activation == 'relu6':
+                if activation == 'relu':
                     node_type = NodeType.ReLU
                 elif activation == 'tanh':
                     node_type = NodeType.TanH
@@ -191,10 +191,33 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     node_type = NodeType.Sigmoid
                 elif activation == "elu":
                     node_type = NodeType.ELU
+                elif activation == 'relu6':
+                    node_type = NodeType.ReLU6
                 node = cnn_layer.LayerNode(layer_name, node_type)
                 up_node.set_activation_node(node)
                 top_map[layer_name] = up_node
                 continue
+        elif layer_type == 'ReLU':
+            if 'threshold' in config and config['threshold'] != 0.0:
+                logging.error('ReLU layer can not support \'threshold\' != 0.')
+                raise cnn_exception.ParseError('Unsupported Layer')
+            if ('max_value' in config and config['max_value'] == 6 and
+                    ('negative_slope' not in config or
+                     config['negative_slope'] == 0)):
+                node_type = NodeType.ReLU6
+            elif 'max_value' not in config or config['max_value'] is None:
+                node_type = NodeType.ReLU
+            else:
+                logging.error('ReLU layer with unsupported parameters.')
+                raise cnn_exception.ParseError('Unsupported Layer')
+            node = cnn_layer.LayerNode(layer_name, node_type)
+            if 'negative_slope' in config:
+                param = cnn_layer.NodeParam()
+                param.relu_param = config['negative_slope']
+                node.set_param(param)
+            up_node.set_activation_node(node)
+            top_map[layer_name] = up_node
+            continue
         elif layer_type == 'LeakyReLU':
             node = cnn_layer.LayerNode(layer_name, NodeType.ReLU)
             param = cnn_layer.NodeParam()
@@ -202,6 +225,26 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             node.set_param(param)
             up_node.set_activation_node(node)
             top_map[layer_name] = up_node
+            continue
+        elif layer_type == 'PReLU':
+            # check if it is using shared axis for width and height axes
+            if 'shared_axes' in config:
+                shared_axes = config['shared_axes']
+            else:
+                shared_axes = None
+            if (is_channel_first and shared_axes == [2, 3] or
+                    not is_channel_first and shared_axes == [1, 2]):
+                node = cnn_layer.LayerNode(layer_name, NodeType.PReLU)
+                if netweight is not None:
+                    weights = get_weights(netweight, layer_name, need_flip,
+                                          ['alpha'])
+                    node.set_weight_bias(weights[0], None)
+                up_node.set_activation_node(node)
+                top_map[layer_name] = up_node
+            else:
+                logging.error('PReLU layer must set its shared_axes to'
+                              'width and height axes.')
+                raise cnn_exception.ParseError('Unsupported Layer')
             continue
         elif layer_type == 'BatchNormalization':
             # handle case that the up_node is not a convolution node
