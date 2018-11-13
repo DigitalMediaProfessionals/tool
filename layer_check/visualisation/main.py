@@ -296,20 +296,24 @@ fpga_files = glob.glob(fpga_folder+'/*')
 keras_files = glob.glob(keras_folder+'/*')
 keras16_files = glob.glob(keras16_folder+'/*')
 debug_files = glob.glob(debug_output_folder+'/*')
+fpga_files = sorted(fpga_files)
+keras_files = sorted(keras_files)
+keras16_files = sorted(keras16_files)
+debug_files = sorted(debug_files)
 
 
-fpga_regex = "layer_input.bin$"
-r=re.compile(fpga_regex)
-fpga_files = list(filter(lambda x: not r.search(x), fpga_files))
-if len(fpga_files)>100:
-    fpga_layers=[]
-    for i in range(10):
-        filenum=('0'+str(i))
-        fpga_layers.append(fpga_folder+'layer'+filenum+'.bin')
-    for i in range(10,len(fpga_files)):
-        filenum=str(i)
-        fpga_layers.append(fpga_folder+'layer'+filenum+'.bin')
-    fpga_files=fpga_layers
+# fpga_regex = "layer_input.bin$"
+# r=re.compile(fpga_regex)
+# fpga_files = list(filter(lambda x: not r.search(x), fpga_files))
+# if len(fpga_files)>100:
+#     fpga_layers=[]
+#     for i in range(10):
+#         filenum=('0'+str(i))
+#         fpga_layers.append(fpga_folder+'layer'+filenum+'.bin')
+#     for i in range(10,len(fpga_files)):
+#         filenum=str(i)
+#         fpga_layers.append(fpga_folder+'layer'+filenum+'.bin')
+#     fpga_files=fpga_layers
 
 if len(fpga_files) != len(keras_files):
     print("Number of input files does not match")

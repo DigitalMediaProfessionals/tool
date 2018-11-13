@@ -6,6 +6,8 @@ from keras.layers import Input, DepthwiseConv2D, Conv2D
 from keras.models import load_model
 from keras.utils.generic_utils import CustomObjectScope, deserialize_keras_object
 from keras.layers import deserialize as layer_from_config
+import matplotlib
+import matplotlib.pyplot as plt
 import pathlib
 import glob
 import os.path
@@ -218,12 +220,71 @@ if args.image_labels==1:
 
 result_data={}
 
+# threshold_dict = dict([('indices',[]),('match',[])])
+
+
+result_data['cpu_result']={}
+result_data['cpu_result']['total']=dict([('filename',[]),('cpu_data',[]), ('cpu_result',[]),
+			 ('cpu_confidence',[]), ('cpu_label_correct',[]), ('fpga_label_correct',[])
+			 ])
+
+thresholds = dict([
+		(0.50,dict([('indices',[]),('cpu_label_correct',[]) ])), 
+		(0.60,dict([('indices',[]),('cpu_label_correct',[]) ])),
+		(0.70,dict([('indices',[]),('cpu_label_correct',[]) ])),
+		(0.75,dict([('indices',[]),('cpu_label_correct',[]) ])),
+		(0.80,dict([('indices',[]),('cpu_label_correct',[]) ])),
+		(0.85,dict([('indices',[]),('cpu_label_correct',[]) ])),
+		(0.90,dict([('indices',[]),('cpu_label_correct',[]) ])),
+		(0.95,dict([('indices',[]),('cpu_label_correct',[]) ]))])
+result_data['cpu_result']['thresholds']=thresholds
+
+for i in range(len(keras_files)):
+	cpu_result_total=result_data['cpu_result']['total']
+			
+	cpu_result_total['cpu_data'].append(np.squeeze(np.load(keras_files[i])))
+
+	cpu_top3_index=cpu_result_total['cpu_data'][-1].argsort()[-3:][::-1]
+	cpu_top3_score=[]
+	for index in cpu_top3_index:
+		cpu_top3_score.append(cpu_result_total['cpu_data'][-1][index])
+
+	cpu_result_total['filename'].append(ntpath.basename(keras_files[i])[:-4])
+	cpu_result_total['cpu_result'].append(cpu_top3_index[0])
+	cpu_result_total['cpu_confidence'].append(cpu_top3_score[0])
+
+	if args.image_labels==1:
+		label=labels[i]
+		cpu_label_correct = 1 if cpu_top3_index[0]==label else 0
+		cpu_result_total['cpu_label_correct'].append(cpu_label_correct)
+				
+	for threshold in list(result_data['cpu_result']['thresholds'].keys()):
+		if cpu_top3_score[0]>threshold:
+			result_data['cpu_result']['thresholds'][threshold]['indices'].append(i)
+			if args.image_labels==1:
+				result_data['cpu_result']['thresholds'][threshold]['cpu_label_correct'].append(cpu_label_correct)
 
 
 
 for subfolder in list(fpga_files_dict.keys()):
 	# subfolder_summary[subfolder]=dict.fromkeys([1, 2, 3, 4])
-	result_data[subfolder]=dict([('total',[]),(50,{}), (60,{}),(70,{}),(75,{}),(80,{}),(85,{}),(90,{}),(95,{})])
+	total_dict=dict([('filename',[]),('cpu_data',[]), ('fpga_data',[]), ('cpu_result',[]), ('fpga_result',[]), ('fpga_cpu_match',[]),
+			 ('cpu_confidence',[]), ('fpga_confidence',[]), ('result_error',[]), ('abs_result_error',[]), ('top3_similarity',[]), ('top3_match',[]),
+			 ('cpu_label_correct',[]), ('fpga_label_correct',[])
+			 ])
+
+	thresholds = dict([
+		(0.50,dict([('indices',[]),('match',[]),('cpu_label_correct',[]), ('fpga_label_correct',[])])), 
+		(0.60,dict([('indices',[]),('match',[]),('cpu_label_correct',[]), ('fpga_label_correct',[])])),
+		(0.70,dict([('indices',[]),('match',[]),('cpu_label_correct',[]), ('fpga_label_correct',[])])),
+		(0.75,dict([('indices',[]),('match',[]),('cpu_label_correct',[]), ('fpga_label_correct',[])])),
+		(0.80,dict([('indices',[]),('match',[]),('cpu_label_correct',[]), ('fpga_label_correct',[])])),
+		(0.85,dict([('indices',[]),('match',[]),('cpu_label_correct',[]), ('fpga_label_correct',[])])),
+		(0.90,dict([('indices',[]),('match',[]),('cpu_label_correct',[]), ('fpga_label_correct',[])])),
+		(0.95,dict([('indices',[]),('match',[]),('cpu_label_correct',[]), ('fpga_label_correct',[])]))])
+
+
+	result_data[subfolder]=dict([('total',total_dict),('thresholds',thresholds)])
 
 	if len(fpga_files_dict[subfolder])!=len(keras_files):
 		next
@@ -245,42 +306,46 @@ for subfolder in list(fpga_files_dict.keys()):
 		for i in range(len(keras_files)):
 			# fpganame=ntpath.basename(fpga_files[i])
 
-			result_data[subfolder]['total'].append(dict.fromkeys(['filename','cpu_data', 'fpga_data', 'cpu_result', 'fpga_result', 'fpga_cpu_match',
-			 'cpu_confidence', 'fpga_confidence', 'result_error', 'abs_result_error', 'top3_similarity', 'top3_match']))
+			# result_data[subfolder]['total'].append(dict.fromkeys(['filename','cpu_data', 'fpga_data', 'cpu_result', 'fpga_result', 'fpga_cpu_match',
+			#  'cpu_confidence', 'fpga_confidence', 'result_error', 'abs_result_error', 'top3_similarity', 'top3_match']))
 
-			subfolder_image_total=result_data[subfolder]['total'][-1]
-
+			subfolder_image_total=result_data[subfolder]['total']
 			
-			
-			subfolder_image_total['cpu_data'] = np.squeeze(np.load(keras_files[i]))
-			subfolder_image_total['fpga_data'] = np.fromfile(fpga_files[i], dtype=np.float32)
+			subfolder_image_total['cpu_data'].append(np.squeeze(np.load(keras_files[i])))
+			subfolder_image_total['fpga_data'].append(np.fromfile(fpga_files[i], dtype=np.float32))
 
-			cpu_top3_index=subfolder_image_total['cpu_data'].argsort()[-3:][::-1]
+			cpu_top3_index=subfolder_image_total['cpu_data'][-1].argsort()[-3:][::-1]
 			cpu_top3_score=[]
 			for index in cpu_top3_index:
-				cpu_top3_score.append(subfolder_image_total['cpu_data'][index])
+				cpu_top3_score.append(subfolder_image_total['cpu_data'][-1][index])
 
-			fpga_top3_index=subfolder_image_total['fpga_data'].argsort()[-3:][::-1]
+			fpga_top3_index=subfolder_image_total['fpga_data'][-1].argsort()[-3:][::-1]
 			fpga_top3_score=[]
 			for index in fpga_top3_index:
-				fpga_top3_score.append(subfolder_image_total['fpga_data'][index])
+				fpga_top3_score.append(subfolder_image_total['fpga_data'][-1][index])
+			
+			fpga_cpu_match = 1 if cpu_top3_index[0]==fpga_top3_index[0] else 0
 
 			titles=['No.','Filename', 'CPU Result','FPGA Result', 'FPGA-CPU Match','CPU Confidence', 'FPGA Confidence', 'Result Error%', 'Abs Result Error%','Top 3 Similarity','Top 3 Match Order']
 
-			subfolder_image_total['filename']=ntpath.basename(keras_files[i])[:-4]
-			subfolder_image_total['cpu_result']=cpu_top3_index[0]
-			subfolder_image_total['fpga_result']=fpga_top3_index[0]
-			subfolder_image_total['fpga_cpu_match'] = str(1) if cpu_top3_index[0]==fpga_top3_index[0] else str(0)
-			subfolder_image_total['cpu_confidence']=cpu_top3_score[0]
-			subfolder_image_total['fpga_confidence']=fpga_top3_score[0]
-			subfolder_image_total['result_error']=100*(fpga_top3_score[0] - cpu_top3_score[0])/fpga_top3_score[0] if cpu_top3_index[0]==fpga_top3_index[0] else 'N/A'
-			subfolder_image_total['abs_result_error']=np.abs(100*(fpga_top3_score[0] - cpu_top3_score[0])/fpga_top3_score[0]) if cpu_top3_index[0]==fpga_top3_index[0] else 'N/A'
-			subfolder_image_total['top3_similarity']=str(len(np.intersect1d(cpu_top3_index,fpga_top3_index)))
-			subfolder_image_total['top3_match']=str(sum(cpu_top3_index==fpga_top3_index))
+			subfolder_image_total['filename'].append(ntpath.basename(keras_files[i])[:-4])
+			subfolder_image_total['cpu_result'].append(cpu_top3_index[0])
+			subfolder_image_total['fpga_result'].append(fpga_top3_index[0])
+			subfolder_image_total['fpga_cpu_match'].append(fpga_cpu_match)
+			subfolder_image_total['cpu_confidence'].append(cpu_top3_score[0])
+			subfolder_image_total['fpga_confidence'].append(fpga_top3_score[0])
+			subfolder_image_total['result_error'].append(100*(fpga_top3_score[0] - cpu_top3_score[0])/fpga_top3_score[0] if cpu_top3_index[0]==fpga_top3_index[0] else 'N/A')
+			subfolder_image_total['abs_result_error'].append(np.abs(100*(fpga_top3_score[0] - cpu_top3_score[0])/fpga_top3_score[0]) if cpu_top3_index[0]==fpga_top3_index[0] else 'N/A')
+			subfolder_image_total['top3_similarity'].append(len(np.intersect1d(cpu_top3_index,fpga_top3_index)))
+			subfolder_image_total['top3_match'].append(sum(cpu_top3_index==fpga_top3_index))
 
-			excel_row = [str(i), subfolder_image_total['filename'],subfolder_image_total['cpu_result'],subfolder_image_total['fpga_result'], subfolder_image_total['fpga_cpu_match'], 
-			subfolder_image_total['cpu_confidence'], subfolder_image_total['fpga_confidence'], subfolder_image_total['result_error'], 
-			subfolder_image_total['abs_result_error'], subfolder_image_total['top3_similarity'], subfolder_image_total['top3_match']]
+
+
+
+
+			excel_row = [i, subfolder_image_total['filename'][-1],subfolder_image_total['cpu_result'][-1],subfolder_image_total['fpga_result'][-1], subfolder_image_total['fpga_cpu_match'][-1], 
+			subfolder_image_total['cpu_confidence'][-1], subfolder_image_total['fpga_confidence'][-1], subfolder_image_total['result_error'][-1], 
+			subfolder_image_total['abs_result_error'][-1], subfolder_image_total['top3_similarity'][-1], subfolder_image_total['top3_match'][-1]]
 
 
 			if args.image_labels==1:
@@ -290,18 +355,110 @@ for subfolder in list(fpga_files_dict.keys()):
 				# 	print(kerasname)
 				# 	print(fpganame)
 				# 	break
+				cpu_label_correct = 1 if cpu_top3_index[0]==label else 0
+				fpga_label_correct = 1 if fpga_top3_index[0]==label else 0
+
+				subfolder_image_total['cpu_label_correct'].append(cpu_label_correct)
+				subfolder_image_total['fpga_label_correct'].append(fpga_label_correct)
+
 				excel_row.append(categories[label])
 				excel_row.append(categories[cpu_top3_index[0]])
 				excel_row.append(categories[fpga_top3_index[0]])
-				excel_row.append(str(1) if cpu_top3_index[0]==label else str(0))
-				excel_row.append(str(1) if fpga_top3_index[0]==label else str(0))
+				excel_row.append(cpu_label_correct)
+				excel_row.append(fpga_label_correct)
+
+
+			for threshold in list(result_data[subfolder]['thresholds'].keys()):
+				if cpu_top3_score[0]>threshold:
+					result_data[subfolder]['thresholds'][threshold]['indices'].append(i)
+					result_data[subfolder]['thresholds'][threshold]['match'].append(fpga_cpu_match)
+					if args.image_labels==1:
+						result_data[subfolder]['thresholds'][threshold]['cpu_label_correct'].append(cpu_label_correct)
+						result_data[subfolder]['thresholds'][threshold]['fpga_label_correct'].append(fpga_label_correct)
 
 			
 			wr.writerow(excel_row)
 
-
+		# sklearn.metrics.accuracy_score(labels,result_data[subfolder]['total']['fpga_result'])
+		# 0.483
+		# import sklearn.metrics
 		file.close()
 
+
+
+
+
+result_data['cpu_result']['summary']={}
+result_data['cpu_result']['summary']['threshold_names']=['Total']
+
+result_data['cpu_result']['summary']['num_images']=[len(result_data['cpu_result']['total']['cpu_label_correct'])]
+result_data['cpu_result']['summary']['num_correct_label']=[sum(result_data['cpu_result']['total']['cpu_label_correct'])]
+result_data['cpu_result']['summary']['percent_correct']=[100*result_data['cpu_result']['summary']['num_correct_label'][-1]/result_data['cpu_result']['summary']['num_images'][-1]]
+
+
+for t in list(result_data['cpu_result']['thresholds'].keys()):
+	result_data['cpu_result']['summary']['threshold_names'].append(t)
+	result_data['cpu_result']['summary']['num_images'].append(len(result_data['cpu_result']['thresholds'][t]['cpu_label_correct']))
+	result_data['cpu_result']['summary']['num_correct_label'].append(sum(result_data['cpu_result']['thresholds'][t]['cpu_label_correct']))
+	result_data['cpu_result']['summary']['percent_correct'].append(100*result_data['cpu_result']['summary']['num_correct_label'][-1]/result_data['cpu_result']['summary']['num_images'][-1])
+
+result_keys = list(result_data.keys())
+result_keys.remove('cpu_result')
+for result_key in result_keys:
+	result_data[result_key]['summary']={}
+	# result_data[result_key]['summary']['num_images']=[len(result_data[result_key]['total']['fpga_label_correct'])]
+	result_data[result_key]['summary']['num_correct_label']=[sum(result_data[result_key]['total']['fpga_label_correct'])]
+	result_data[result_key]['summary']['percent_correct']=[100*result_data[result_key]['summary']['num_correct_label'][-1]/result_data['cpu_result']['summary']['num_images'][0]]
+
+	for i, t in enumerate(list(result_data[result_key]['thresholds'].keys())):
+		# result_data[result_key]['summary']['num_images'].append(len(result_data[result_key]['thresholds'][t]['fpga_label_correct']))
+		result_data[result_key]['summary']['num_correct_label'].append(sum(result_data[result_key]['thresholds'][t]['fpga_label_correct']))
+		result_data[result_key]['summary']['percent_correct'].append(100*result_data[result_key]['summary']['num_correct_label'][-1]/result_data['cpu_result']['summary']['num_images'][i+1])
+
+
+file = open(network_folder_name+"accuracy_summary.csv", "w", newline='')
+wr = csv.writer(file)
+
+row =['Confidence', 'Total', 'CPU Correct', 'CPU %']
+for result_key in result_keys:
+	row.append(result_key+' Correct')
+	row.append(result_key+' %')
+wr.writerow(row)
+
+for i, t in enumerate(list(result_data['cpu_result']['thresholds'].keys())):
+	row=[t]
+	row.append(result_data['cpu_result']['summary']['num_images'][i])
+	row.append(result_data['cpu_result']['summary']['num_correct_label'][i])
+	row.append(result_data['cpu_result']['summary']['percent_correct'][i])
+
+	for result_key in result_keys:
+		row.append(result_data[result_key]['summary']['num_correct_label'][i])
+		row.append(result_data[result_key]['summary']['percent_correct'][i])
+	wr.writerow(row)
+	
+file.close()
+
+
+
+
+
+
+fig = plt.figure()
+ax = plt.axes()
+colormap = matplotlib.cm.Set1.colors
+x_range = range(len(result_data['cpu_result']['summary']['threshold_names']))
+plt.xticks(x_range, result_data['cpu_result']['summary']['threshold_names'])
+plt.ylim(0, 100);
+plt.title(args.INPUT_FOLDER+" Accuracy")
+plt.xlabel("Confidence Threshold")
+plt.plot(x_range, result_data['cpu_result']['summary']['percent_correct'], color = colormap[0], label='cpu_result', marker="o")
+result_keys = list(result_data.keys())
+result_keys.remove('cpu_result')
+for i, result_key in enumerate(result_keys):
+	plt.plot(x_range, result_data[result_key]['summary']['percent_correct'], color = colormap[i+1], label=result_key,  marker=".")
+plt.legend();
+
+fig.savefig(network_folder_name+"AccuracySummary.png")
 
 
 

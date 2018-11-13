@@ -149,6 +149,8 @@ def layer_split(fpga_network, network_def, **kwargs):
 	pathlib.Path(network_folder_name+'keras_networks').mkdir(parents=True, exist_ok=True)
 	pathlib.Path(network_folder_name+'PLACE_FPGA_DUMPS_HERE').mkdir(parents=True, exist_ok=True)
 	pathlib.Path(network_folder_name+'keras_outputs_float16').mkdir(parents=True, exist_ok=True)
+	pathlib.Path(network_folder_name+'model_images').mkdir(parents=True, exist_ok=True)
+	
 	# network_def = 'C:\\Alex\\Work\\fpga_perf\\tool\\network\\mobilenet.h5'
 
 	f = h5py.File(network_def, mode='r')
@@ -160,7 +162,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 	globs['Sequential'] = models.Sequential
 	
 	try:
-		custom_objects = {'relu6': keras.applications.mobilenet.relu6, 'LRN': googlenet_custom_layers.LRN2D}
+		custom_objects = {'relu6': keras.layers.ReLU(6.),'DepthwiseConv2D': keras.layers.DepthwiseConv2D, 'LRN': googlenet_custom_layers.LRN2D}
 	except:
 		custom_objects = {'relu6': keras_applications.mobilenet_v2.layers.ReLU(6, name='relu6'), 'LRN': googlenet_custom_layers.LRN2D}
 	# globs['Conv2D']= layers.Conv2D
@@ -183,7 +185,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 	# print('qwerty')
 	# print('qwerty')
 	# model_weights = model_load.get_weights()
-	plot_file = network_folder_name+'/'+network_name+'_model.png'
+	plot_file = network_folder_name+'model_images/'+network_name+'_model.png'
 	plot_model(model_load, to_file=plot_file, show_shapes=True)
 
 
@@ -463,16 +465,23 @@ def layer_split(fpga_network, network_def, **kwargs):
 							input_layer = model_inputs[input_node.name]	
 						else:
 							# dim=input_node.output_dim
-							if len(input_node.output_dim)==3:
-								if input_params['channels_first'] == True:
-									dim = (input_node.output_dim[2], input_node.output_dim[0], input_node.output_dim[1])
-									output_dim = (layer.node_out.input_dim[2], layer.node_out.input_dim[0], layer.node_out.input_dim[1])
-								else:
-									dim = reorder(input_node.output_dim)
-									output_dim = reorder(layer.node_out.input_dim)
-							elif len(input_node.output_dim)==1:
-								dim = input_node.output_dim
-								output_dim = layer.node_out.input_dim
+							# if len(input_node.output_dim)==3:
+							# 	if input_params['channels_first'] == True:
+							# 		dim = (input_node.output_dim[2], input_node.output_dim[0], input_node.output_dim[1])
+							# 		output_dim = (layer.node_out.input_dim[2], layer.node_out.input_dim[0], layer.node_out.input_dim[1])
+							# 	else:
+							# 		dim = reorder(input_node.output_dim)
+							# 		output_dim = reorder(layer.node_out.input_dim)
+							# elif len(input_node.output_dim)==1:
+							# 	dim = input_node.output_dim
+							# 	output_dim = layer.node_out.input_dim
+
+							model_input_layer = model_load.get_layer(input_node.name)
+							dim=model_input_layer.output_shape
+							if dim[0]==None:
+								dim=dim[1:]
+
+
 							input_layer=Input(shape=dim)
 							model_inputs[input_node.name] = input_layer
 							model_inputs_list.append(input_layer)
@@ -529,7 +538,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 			name = name.replace('/','_')
 			
 			keras_model = Model(inputs = model_inputs_list, outputs = keras_layers[node_layer_name])
-			keras_model_file = network_folder_name+'/'+network_name+str(i)+name+'.png'
+			keras_model_file = network_folder_name+'model_images/'+network_name+str(i)+name+'.png'
 
 			plot_model(keras_model, to_file=keras_model_file, show_shapes=True)
 			for keras_model_layer in keras_model.layers:
