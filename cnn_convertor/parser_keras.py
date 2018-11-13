@@ -26,10 +26,13 @@ NodeType = cnn_layer.NodeType
 
 
 def get_padding(layer, pad_map):
-    pad_name = layer['inbound_nodes'][0][0][0]
-    if pad_name in pad_map:
-        return pad_map[pad_name]
-    return [0, 0, 0, 0]
+    if type(pad_map) == dict:
+        pad_name = layer['inbound_nodes'][0][0][0]
+        if pad_name in pad_map:
+            return pad_map[pad_name]
+        return [0, 0, 0, 0]
+    else:
+        return pad_map
 
 
 def set_inplace_node(node, config):
@@ -131,7 +134,10 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             break
 
     top_map = {}
-    pad_map = {}
+    if is_sequential:
+        pad_map = [0, 0, 0, 0]
+    else:
+        pad_map = {}
     prev_node = None
     # Handle each layer node
     parsed_nodes = []
@@ -302,7 +308,10 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                         "Unsupported Keras ZeroPadding2D: %s" % pad)
                 padding = [int(pad)] * 4
             top_map[layer_name] = up_node
-            pad_map[layer_name] = padding
+            if is_sequential:
+                pad_map = padding
+            else:
+                pad_map[layer_name] = padding
             continue
         elif layer_type == 'ZeroPadding2D':
             # there is no padding layer if caffe so just extract padding info
@@ -369,7 +378,10 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                         "Unsupported Keras ZeroPadding2D: %s" % pad)
                 padding = [int(pad), int(pad), int(pad), int(pad)]
             top_map[layer_name] = up_node
-            pad_map[layer_name] = padding
+            if is_sequential:
+                pad_map = padding
+            else:
+                pad_map[layer_name] = padding
             continue
         elif layer_type == 'Merge':
             mode = config['mode']
