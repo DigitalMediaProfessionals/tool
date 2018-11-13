@@ -425,7 +425,10 @@ for result_key in result_keys:
 	row.append(result_key+' %')
 wr.writerow(row)
 
-for i, t in enumerate(list(result_data['cpu_result']['thresholds'].keys())):
+
+
+
+for i, t in enumerate(list(result_data['cpu_result']['summary']['threshold_names'])):
 	row=[t]
 	row.append(result_data['cpu_result']['summary']['num_images'][i])
 	row.append(result_data['cpu_result']['summary']['num_correct_label'][i])
