@@ -23,14 +23,13 @@ import numpy as np
 
 
 NodeType = cnn_layer.NodeType
-padding = [0, 0, 0, 0]
 
 
-def get_padding():
-    global padding
-    ret = list(padding)
-    padding = [0, 0, 0, 0]
-    return ret
+def get_padding(layer, pad_map):
+    pad_name = layer['inbound_nodes'][0][0][0]
+    if pad_name in pad_map:
+        return pad_map[pad_name]
+    return [0, 0, 0, 0]
 
 
 def set_inplace_node(node, config):
@@ -132,10 +131,10 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             break
 
     top_map = {}
+    pad_map = {}
     prev_node = None
     # Handle each layer node
     parsed_nodes = []
-    global padding
     for i, layer in enumerate(layers):
         layer_type = layer['class_name']
         config = layer['config']
@@ -303,6 +302,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                         "Unsupported Keras ZeroPadding2D: %s" % pad)
                 padding = [int(pad)] * 4
             top_map[layer_name] = up_node
+            pad_map[layer_name] = padding
             continue
         elif layer_type == 'ZeroPadding2D':
             # there is no padding layer if caffe so just extract padding info
@@ -369,6 +369,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                         "Unsupported Keras ZeroPadding2D: %s" % pad)
                 padding = [int(pad), int(pad), int(pad), int(pad)]
             top_map[layer_name] = up_node
+            pad_map[layer_name] = padding
             continue
         elif layer_type == 'Merge':
             mode = config['mode']
@@ -443,7 +444,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             else:
                 param.kernel_size = (config['kernel_size'][1],
                                      config['kernel_size'][0])
-            param.pad_lrtb = get_padding()
+            param.pad_lrtb = get_padding(layer, pad_map)
             param.keras_padding = config['padding']
             if is_1D:
                 param.stride = (config['strides'][0], 1)
@@ -489,13 +490,13 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 param.pool = 1
             if layer_type in ('MaxPooling1D', 'AveragePooling1D'):
                 param.kernel_size = (config['pool_size'][0], 1)
-                param.pad_lrtb = get_padding()
+                param.pad_lrtb = get_padding(layer, pad_map)
                 param.keras_padding = config['padding']
                 param.stride = (config['strides'][0], 1)
             elif layer_type in ('MaxPooling2D', 'AveragePooling2D'):
                 param.kernel_size = (config['pool_size'][1],
                                      config['pool_size'][0])
-                param.pad_lrtb = get_padding()
+                param.pad_lrtb = get_padding(layer, pad_map)
                 param.keras_padding = config['padding']
                 param.stride = (config['strides'][1], config['strides'][0])
             else:

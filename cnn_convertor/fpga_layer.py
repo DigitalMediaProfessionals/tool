@@ -997,10 +997,11 @@ class FPGANetwork(object):
             elif node.type is NodeType.Pooling:
                 # Test if the pool node can merge with previous convolution node
                 if (prev_node_type == NodeType.Convolution and
-                    node.param.pool == 0 and
-                    layer_start_index != -1 and
-                    calc_conv_tiles(tl[index - 1]) == 1 and
-                        calc_pool_tiles(node) == 1):
+                        node.param.pool == 0 and
+                        layer_start_index != -1 and
+                        calc_conv_tiles(tl[index - 1]) == 1 and
+                        calc_pool_tiles(node) == 1 and
+                        node in tl[index - 1].output_nodes):
                     index += 1
                     converted_node.append(node)
                     continue
