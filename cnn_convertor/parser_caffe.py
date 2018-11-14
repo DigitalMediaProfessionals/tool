@@ -25,13 +25,30 @@ NodeType = cnn_layer.NodeType
 def get_tuple(param):
     try:
         if len(param) == 0:
-            return (0, 0)
+            return 0, 0
         elif len(param) == 1:
-            return (param[0], param[0])
+            return param[0], param[0]
         else:
-            return (param[0], param[1])
+            return param[0], param[1]
     except TypeError:
-        return (param, param)
+        return param, param
+
+
+def get_pad(param):
+    try:
+        if len(param) == 0:
+            return 0, 0, 0, 0
+        if len(param) == 1:
+            return param[0], param[0], param[0], param[0]
+        if len(param) == 2:
+            return param[0], param[0], param[1], param[1]
+        if len(param) == 4:
+            return param[0], param[1], param[2], param[3]
+        raise ValueError("Unsupported pad=%s" % param)
+    except TypeError:
+        assert int(param) == param
+        return param, param, param, param
+
 
 
 def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
@@ -112,6 +129,10 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
                     param.relu_param = layer.relu_param.negative_slope
                     node.set_param(param)
                 up_node.set_activation_node(node)
+            # If this is not in-place layer, add the up_node to the top_map
+            # Using the output label of this layer too
+            if layer.top[0] != layer.bottom[0]:
+                top_map[layer.top[0]] = up_node
             continue
         elif node_type in (NodeType.DropOut, NodeType.Data):
             # Ignore data and drop out layer
@@ -145,7 +166,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             param = cnn_layer.NodeParam()
             param.num_output = int(layer.convolution_param.num_output)
             param.kernel_size = get_tuple(layer.convolution_param.kernel_size)
-            param.pad = get_tuple(layer.convolution_param.pad)
+            param.pad_lrtb = get_pad(layer.convolution_param.pad)
             param.stride = get_tuple(layer.convolution_param.stride)
             param.group = int(layer.convolution_param.group)
             node.set_param(param)
@@ -153,7 +174,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             param = cnn_layer.NodeParam()
             param.pool = int(layer.pooling_param.pool)
             param.kernel_size = get_tuple(layer.pooling_param.kernel_size)
-            param.pad = get_tuple(layer.pooling_param.pad)
+            param.pad_lrtb = get_pad(layer.pooling_param.pad)
             param.stride = get_tuple(layer.pooling_param.stride)
             param.is_global = layer.pooling_param.global_pooling
             node.set_param(param)
@@ -177,11 +198,15 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
         elif node_type == NodeType.LRN:
             param = cnn_layer.NodeParam()
             node.set_param(param)
+        elif node_type == NodeType.Reshape:
+            param = cnn_layer.NodeParam()
+            dims = layer.reshape_param.shape.dim
+            param.reshape_param = (dims[3], dims[2], dims[1])
+            node.set_param(param)
 
     for node in parsed_nodes:
         if len(node.output_nodes) == 0:
             network.append_output_node(node)
-
 
 
 def parse_caffe_def(
@@ -250,3 +275,11 @@ def parse_caffe_data(
             weight = np.float32(caffe_layer.blobs[0].data)
             bias = np.float32(caffe_layer.blobs[1].data)
             layer.sc_node.set_weight_bias(weight, bias)
+
+        # set parameters for PReLU activation node
+        if layer.act_node and layer.act_node.type == NodeType.PReLU:
+            caffe_layer = search_caffe_layer(layers, layer.act_node.name)
+            weight = np.float32(caffe_layer.blobs[0].data)
+            bias = np.zeros((layer.output_dim[-1]))
+            layer.act_node.set_weight_bias(weight, bias)
+

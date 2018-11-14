@@ -71,14 +71,18 @@ PROJECT_BRIEF          = {proj_name}" generated configuration for DMP DV700 FPGA
 # pixels and the maximum width should not exceed 200 pixels. Doxygen will copy
 # the logo to the output directory.
 
-PROJECT_LOGO           = ..\..\doc\dmpLogo.png
+
+PROJECT_LOGO           = ../../doc/dmpLogo.png
+
 
 # The OUTPUT_DIRECTORY tag is used to specify the (relative or absolute) path
 # into which the generated documentation will be written. If a relative path is
 # entered, it will be relative to the location where doxygen was started. If
 # left blank the current directory will be used.
 
-OUTPUT_DIRECTORY       = .\html
+
+OUTPUT_DIRECTORY       = ./html
+
 
 # If the CREATE_SUBDIRS tag is set to YES then doxygen will create 4096 sub-
 # directories (in 2 levels) under the output directory of each output format and
@@ -811,13 +815,11 @@ WARN_LOGFILE           =
 # spaces. See also FILE_PATTERNS and EXTENSION_MAPPING
 # Note: If this tag is empty the current directory is searched.
 
-INPUT                  = pages.dox ..\{proj_name}_gen.cpp ..\{proj_name}_gen.h \
-                         ..\..\dv700\include\dmp_network.h \
-                         ..\..\dv700\include\conv_conf.h \
-                         ..\..\dv700\include\hw_conv_conf.h \
-                         ..\..\dv700\include\hw_module_manager.h \
-                         ..\..\common\include\util_draw.h \
-                         ..\..\common\include\util_input.h \
+
+INPUT                  = pages.dox ../{proj_name}_gen.cpp ../{proj_name}_gen.h \
+                         ../../common/include/dmp_network.h \
+                         ../../common/include/util_draw.h \
+                         ../../common/include/util_input.h \
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses
@@ -2521,18 +2523,19 @@ DOT_CLEANUP            = YES
 
 page_header = r"""/*!*********************************************************************************
 \mainpage {proj_name} Documentation: Conversion results
-\section Quick what to do next to run the app
+\section quick What to do next to run the app
 In the following section, one can find the conversion results of the network.In order to compile the corresponding application, one needs to :
 - Include the 2 generated files to the make / project
 - In the main file of the application, the network initialization is done with :
-  + network.initialize();
-  + network.reserve_memory();
-  + network.load_weights(FILENAME_WEIGHTS)
+  + network.Initialize();
+  + network.LoadWeights(FILENAME_WEIGHTS);
+  + network.Commit();
+
   + where network is the instance of the current network class
 
 
 - To run the network :
- + network.run_network();
+ + network.RunNetwork();
 
 
 - To get the results :
@@ -2542,7 +2545,8 @@ result_normal = r"""  + network.get_final_output(tensor);
   + where tensor is a vector of floats, allocated in the network function"""
 
 table_header = r"""
-\section FPGA Mapping summary table
+\section mapping FPGA Mapping summary table
+
 
 | ID | Layers | Type | Dim In | Dim Out | Param | Mem | No. MUL | No. ADD |
 | :- | :- | :- | :- | :- | :- | -: | -: | -: |
@@ -2632,7 +2636,7 @@ def output_page(of, network_name, gengraph, fpga_net):
         '| SUM | - | - | - | - | - | - | {0} | {1} |\n'.format(total_mul_ops, total_add_ops))
     of.write('\n')
     if gengraph:
-        of.write('\\section Graph\n')
+        of.write('\\section graph Graph\n')
         of.write('\\dotfile {0}.dot\n'.format(network_name))
         of.write('\n')
     of.write(
@@ -2641,8 +2645,6 @@ def output_page(of, network_name, gengraph, fpga_net):
 
 def graph_name(name: str) -> str:
     return name.replace('/', '_').replace('-', '_')
-
-
 
 def output_graph(of, fpga_net):
     tl = fpga_net.original_net.traverse_list

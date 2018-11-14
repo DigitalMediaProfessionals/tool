@@ -8,7 +8,6 @@
 
         http://www.apache.org/licenses/LICENSE-2.0
 
-
     Unless required by applicable law or agreed to in writing, software
     distributed under the License is distributed on an "AS IS" BASIS,
     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,7 +19,7 @@ import math
 import logging
 import numpy as np
 from cnn_convertor import cnn_layer, cnn_exception, cnn_docgen
-from cnn_convertor.cnn_layer import NodeType
+from cnn_convertor.cnn_layer import NodeType, get_conv_out_width
 from enum import IntEnum, auto
 
 
@@ -63,7 +62,9 @@ def get_actfunc(tpe):
     return {
         NodeType.TanH: 1,
         NodeType.Sigmoid: 3,
-        NodeType.ELU: 5}.get(tpe, 2)
+        NodeType.PReLU: 4,
+        NodeType.ELU: 5,
+        NodeType.ReLU6: 6}.get(tpe, 2)
 
 
 def make_align_size(size):
@@ -80,10 +81,6 @@ def divup(a, b):
     return n
 
 
-def get_conv_out_width(width, kx, pad, stride):
-    return (pad + width + pad - kx) // stride + 1
-
-
 def calc_conv_tiles(node):
     if node.param.group > 1:
         return 1
@@ -92,15 +89,15 @@ def calc_conv_tiles(node):
     c = node.input_dim[2]
     m = node.output_dim[2]
     p = node.param.kernel_size[0]
-    pad = node.param.pad
+    pad_lrtb = node.param.pad_lrtb
     stride = node.param.stride
     c_blocks = (c >> 3) + (1 if c & 7 else 0)
     t = 0
     while True:
         t += 1
         tw = divup(w, t) + p - 1  # width of tile
-        ow = get_conv_out_width(tw, p, pad[0], stride[0])
-        oh = get_conv_out_width(h, p, pad[1], stride[1])
+        ow = get_conv_out_width(tw, p, pad_lrtb[0], pad_lrtb[1], stride[0])
+        oh = get_conv_out_width(h, p, pad_lrtb[2], pad_lrtb[3], stride[1])
         os = ow * oh * min(8, m)  # output buffer size
         ts_1c = tw * h  # tile size for single channel
         ts_blk16 = ts_1c * min(8, c)
@@ -156,10 +153,8 @@ def merge_bn_scale(node, kernel_size, n_c, n_m):
     e = 0.00001
     weight.shape = (n_m, n_c * kernel_size[1] * kernel_size[0])
     for i in range(n_m):
-        try:
-            norm = sc_weight[i] / math.sqrt(bn_var[i] + e)
-        except:
-            print("weighterror")
+        assert np.min(bn_var[i]) >= 0, "Invalid bn_var[%d]=%s" % (i, bn_var[i])
+        norm = sc_weight[i] / math.sqrt(bn_var[i] + e)
         weight[i, :] = weight[i, :] * norm
         bias[i] = (bias[i] - bn_mean[i]) * norm + sc_bias[i]
     weight.shape = (-1,)
@@ -206,6 +201,10 @@ def calc_kmeans(weight):
 
     return centers, labels
 
+def get_kernel_size_for_weight(node):
+    k = node.param.kernel_size
+    p = max(k[0], k[1]) | 1
+    return (p, p)
 
 def pack_weight(node, of, quantization):
     logging.info('Packing weight for node: %s.', node.name)
@@ -214,7 +213,7 @@ def pack_weight(node, of, quantization):
     if node.param.group > 1:
         n_c = n_c // node.param.group
     n_m = node.output_dim[2]
-    kernel_size = node.param.kernel_size
+    kernel_size = get_kernel_size_for_weight(node)
 
     weight = node.weight
     bias = node.bias
@@ -228,6 +227,10 @@ def pack_weight(node, of, quantization):
 
     if node.bn_node is not None or node.sc_node is not None:
         weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m)
+    if node.act_node and node.act_node.type == NodeType.PReLU:
+        prelu = node.act_node.weight
+    else:
+        prelu = None
 
     if quantization:
         centers, labels = calc_kmeans(weight)
@@ -236,6 +239,10 @@ def pack_weight(node, of, quantization):
         labels = weight.astype(np.float16)
         weight_type = np.float16
     bias16 = bias.astype(np.float16)
+    if prelu is not None:
+        prelu16 = prelu.astype(np.float16)
+    else:
+        prelu16 = None
     buffer = np.zeros(shape=(12, 6), dtype=weight_type)
 
     labels.shape = (n_m, n_c, kernel_size[1], kernel_size[0])
@@ -247,6 +254,10 @@ def pack_weight(node, of, quantization):
             bias16[m_start:m_stop].tofile(of)
             for i in range(m_stop, m_start + 8):
                 of.write(b'\0\0')
+            if prelu16 is not None:
+                prelu16[m_start:m_stop].tofile(of)
+                for i in range(m_stop, m_start + 8):
+                    of.write(b'\0\0')
             for c_start in range(0, n_c, 8):
                 c_stop = min(c_start + 8, n_c)
                 for m in range(m_start, m_stop):
@@ -265,6 +276,10 @@ def pack_weight(node, of, quantization):
             bias16[m_start:m_stop].tofile(of)
             for i in range(m_stop, m_start + 8):
                 of.write(b'\0\0')
+            if prelu16 is not None:
+                prelu16[m_start:m_stop].tofile(of)
+                for i in range(m_stop, m_start + 8):
+                    of.write(b'\0\0')
             for c_start in range(0, n_c, 8):
                 c_stop = min(c_start + 8, n_c)
                 for m in range(m_start, m_stop):
@@ -283,6 +298,10 @@ def pack_weight(node, of, quantization):
             bias16[m_start:m_stop].tofile(of)
             for i in range(m_stop, m_start + 8):
                 of.write(b'\0\0')
+            if prelu16 is not None:
+                prelu16[m_start:m_stop].tofile(of)
+                for i in range(m_stop, m_start + 8):
+                    of.write(b'\0\0')
             for c_start in range(0, n_c, 8):
                 c_stop = min(c_start + 8, n_c)
                 for m in range(m_start, m_stop):
@@ -301,6 +320,10 @@ def pack_weight(node, of, quantization):
             bias16[m_start:m_stop].tofile(of)
             for i in range(m_stop, m_start + 8):
                 of.write(b'\0\0')
+            if prelu16 is not None:
+                prelu16[m_start:m_stop].tofile(of)
+                for i in range(m_stop, m_start + 8):
+                    of.write(b'\0\0')
             for c_start in range(0, n_c, 64):
                 c_stop = min(c_start + 64, n_c)
                 for m in range(m_start, m_stop):
@@ -316,8 +339,14 @@ def pack_weight(node, of, quantization):
     else:
         logging.exception('Encountered unsupported kernel size %d.',
                           kernel_size[0])
-        raise cnn_exception.ConvertError('Unsupported kernel size' +
-                                         kernel_size[0])
+        raise cnn_exception.ConvertError('Unsupported kernel size ' +
+                                         str(kernel_size[0]))
+
+    # add 0 padding so weight size will be 16-bytes aligned
+    d = of.tell() & 15
+    if d:
+        logging.info("Added %d zeros to align weight size", 16 - d)
+        np.zeros(16 - d, dtype=np.uint8).tofile(of)
 
 
 def pack_fc_weight(node, conv_node, of, quantization):
@@ -329,9 +358,10 @@ def pack_fc_weight(node, conv_node, of, quantization):
     else:
         labels = node.weight.astype(np.float16)
     bias16 = node.bias.astype(np.float16)
-
+    offs = 0
     if quantization:
         centers.tofile(of)
+        offs += centers.nbytes
     if conv_node is not None:
         if len(conv_node.output_dim) == 3:
             w, h, c = conv_node.output_dim
@@ -347,7 +377,22 @@ def pack_fc_weight(node, conv_node, of, quantization):
                     tr_index8 = labels[n, d:e, :, :].transpose(2, 1, 0)
                     labels[n, d:e, :, :] = tr_index8.reshape(e - d, h, w)
     labels.tofile(of)
+    offs += labels.nbytes
+
+    d = offs & 15  # bias must be 16-bytes aligned
+    if d:
+        logging.info("Added %d zeros to align bias", 16 - d)
+        np.zeros(16 - d, dtype=np.uint8).tofile(of)
+        offs += 16 - d
     bias16.tofile(of)
+    offs += bias16.nbytes
+
+    d = offs & 15  # add 0 padding so weight size will be 16-bytes aligned
+    if d:
+        logging.info("Added %d zeros to align bias size", 16 - d)
+        np.zeros(16 - d, dtype=np.uint8).tofile(of)
+        offs += 16 - d
+
 
 
 def get_weight_size(node, quantization):
@@ -357,7 +402,7 @@ def get_weight_size(node, quantization):
     if node.param.group > 1:
         c //= node.param.group
     m = node.output_dim[2]
-    k = node.param.kernel_size
+    k = get_kernel_size_for_weight(node)
     if k[0] == 7:
         pass
     if k[0] == 5:
@@ -368,10 +413,13 @@ def get_weight_size(node, quantization):
         c = c // 64 + (0 if c % 64 == 0 else 1)
     if quantization:
         weight_size = 512 + 72 * m * c + 16 * ((m + 7) // 8)
+        weight_size = (weight_size + 0xf) & (~0xf)  # align to 16 bytes
     else:
         weight_size = 144 * m * c + 16 * ((m + 7) // 8)
+    # add PReLU parameter size
+    if node.act_node and node.act_node.type == NodeType.PReLU:
+        weight_size += 16 * ((m + 7) // 8)
     return weight_size
-
 
 
 def get_fc_weight_size(node, quantization):
@@ -381,9 +429,12 @@ def get_fc_weight_size(node, quantization):
         w, h, c = 1, 1, node.input_dim[0]
     m = node.output_dim[0]
     if quantization:
-        size = w * h * c * m + m * 2 + 512
+        size = w * h * c * m + 512
     else:
-        size = w * h * c * m * 2 + m * 2
+        size = w * h * c * m * 2
+    size = (size + 0xf) & (~0xf)  # align to 16 bytes
+    size += m * 2
+    size = (size + 0xf) & (~0xf)  # align to 16 bytes
     return size
 
 
@@ -495,7 +546,6 @@ def gen_source_header(of, name, net):
 
 def gen_source_conv(of, name, n, layer, quantization):
     global weight_offset
-    global is_tensorflow
     of.write('//Layer_{0}: Convolution Layer\n'.format(n))
     layer_names = []
     for run in layer.run:
@@ -546,24 +596,23 @@ def gen_source_conv(of, name, n, layer, quantization):
     for i, run in enumerate(layer.run):
         is_conv = run.conv is not None and run.conv.type is NodeType.Convolution
         is_lrn = run.conv is not None and run.conv.type is NodeType.LRN
-        p = (run.conv.param.kernel_size[0] if is_conv else 1)
         if is_conv:
+            p = run.conv.param.kernel_size[0]
+            if run.conv.param.kernel_size[1] != run.conv.param.kernel_size[0]:
+                p |= (run.conv.param.kernel_size[1] << 8)
             conv_enable = (1 if run.conv.param.group <= 1 else 3)
         else:
+            p = 1
             conv_enable = 0
-        conv_pad = (run.conv.param.pad[0] | (
-            run.conv.param.pad[1] << 16) if is_conv else 0)
-        conv_pad |= conv_pad << 8
-        conv_stride = (run.conv.param.stride[0] | (
-            run.conv.param.stride[1] << 8) if is_conv else 0x101)
+        conv_pad = run.conv.param.pad_fpga if is_conv else 0
+        conv_stride = (run.conv.param.stride[0] |
+                       (run.conv.param.stride[1] << 8) if is_conv else 0x0101)
         pool_enable = (1 if run.pool else 0)
         pool_size = (run.pool.param.kernel_size[0] | (
             run.pool.param.kernel_size[1] << 8) if run.pool else 0)
         pool_stride = (run.pool.param.stride[0] | (
             run.pool.param.stride[1] << 8) if run.pool else 0x101)
-        pool_pad = (run.pool.param.pad[0] | (
-            run.pool.param.pad[1] << 16) if run.pool else 0)
-        pool_pad |= pool_pad << 8
+        pool_pad = run.pool.param.pad_fpga if run.pool else 0
         actfunc = 0
         actparam = 0
         pool_avg_param = 0
@@ -580,9 +629,13 @@ def gen_source_conv(of, name, n, layer, quantization):
                  node_out.param.pool != 0) or
                     node_out.type is NodeType.Eltwise):
                 pool_enable = 2
-                pool_avg_param = np.float16(
-                    1.0 / (run.pool.param.kernel_size[0] *
-                           run.pool.param.kernel_size[1])).view(np.uint16)
+                if run.pool.param.split_pool_divisor is None:
+                    pool_avg_param = np.float16(
+                        1.0 / (run.pool.param.kernel_size[0] *
+                               run.pool.param.kernel_size[1])).view(np.uint16)
+                else:
+                    pool_avg_param = np.float16(
+                        1.0 / run.pool.param.split_pool_divisor).view(np.uint16)
             if node_out.type is NodeType.UpSampling:
                 pool_enable = 4
             if node_out.type is NodeType.Power:
@@ -590,19 +643,7 @@ def gen_source_conv(of, name, n, layer, quantization):
                 pool_avg_param = np.float16(
                     node_out.param.scale).view(np.uint16)
         m = node_out.output_dim[2]
-        # adjust pad size if backend was tensorflow
-        if is_tensorflow:
-            if run.conv is not None:
-                if ((conv_pad & 0xFF) * 2 + run.conv.input_dim[0] - p) > (run.conv.output_dim[0] - 1) * (conv_stride & 0xFF):
-                    conv_pad -= 1
-                if (((conv_pad & 0xFF0000) >> 16) * 2 + run.conv.input_dim[1] - p) > (run.conv.output_dim[1] - 1) * ((conv_stride & 0xFF00) >> 8):
-                    conv_pad -= 0x10000
-            if run.pool is not None and run.pool.type is NodeType.Pooling:
-                if ((pool_pad & 0xFF) * 2 + run.pool.input_dim[0] - run.pool.param.kernel_size[0]) > (run.pool.output_dim[0] - 1) * (pool_stride & 0xFF):
-                    pool_pad -= 1
-                if (((pool_pad & 0xFF0000) >> 16) * 2 + run.pool.input_dim[1] - run.pool.param.kernel_size[1]) > (run.pool.output_dim[1] - 1) * ((pool_stride & 0xFF00) >> 8):
-                    pool_pad -= 0x10000
-        # detect if this is the case of pool node being merged into concat node
+        # Detect if this is the case of pool node being merged into concat node
         if node_in != node_out and node_in not in node_out.input_nodes:
             m = node_in.output_dim[2]
         of.write('  //--------------------------------------------------\n')
@@ -620,7 +661,7 @@ def gen_source_conv(of, name, n, layer, quantization):
             of.write('  //->: {0}\n'.format(run.pool.name))
         of.write('  conf.run[{0}].m = {1};  // Output Channels\n'.format(i, m))
         of.write('  conf.run[{0}].conv_enable = {1};  // 1 = Enabled, 0 = Disabled\n'.format(i, conv_enable))
-        of.write('  conf.run[{0}].p = {1};  // Filter Width and Height\n'.format(i, p))
+        of.write('  conf.run[{0}].p = 0x{1:X};  // Filter Width and Height\n'.format(i, p))
         of.write('  conf.run[{0}].pz = 1;  // Filter Depth\n'.format(i))
         of.write('  conf.run[{0}].weight_buf.mem = weights_mem_;\n'
                  '  conf.run[{0}].weight_buf.offs = {1};\n'.format(i, weight_offset))
@@ -632,7 +673,7 @@ def gen_source_conv(of, name, n, layer, quantization):
         of.write('  conf.run[{0}].pool_size = 0x{1:X};  // bits [7:0] = width, bits [15:8] = height\n'.format(i, pool_size))
         of.write('  conf.run[{0}].pool_stride = 0x{1:X};  // bits [7:0] = X stride, bits [15:8] = Y stride\n'.format(i, pool_stride))
         of.write('  conf.run[{0}].pool_pad = 0x{1:X};  // bits [7:0] = left padding, bits [15:8] = right padding, bits [23:16] = top padding, bits [31:24] = bottom padding\n'.format(i, pool_pad))
-        of.write('  conf.run[{0}].pool_avg_param = 0x{1:X};  // Must be set to 1/pool_size^2 in FP16 format when using average pooling (average pooling assumes square size)\n'.format(i, pool_avg_param))
+        of.write('  conf.run[{0}].pool_avg_param = 0x{1:X};  // Usually set to 1/pool_size^2 in FP16 format when using average pooling (average pooling assumes square size)\n'.format(i, pool_avg_param))
         of.write('  conf.run[{0}].actfunc = {1};  // Activation Function: 0 = None, 1 = Tanh, 2 = Leaky ReLU, 3 = Sigmoid, 4 = PReLU, 5 = ELU, 6 = ReLU6\n'.format(i, actfunc))
         of.write('  conf.run[{0}].actfunc_param = 0x{1:X};  // Leaky ReLU parameter (NOTE: 0x2E66 is 0.1 in FP16)\n'.format(i, actparam))
         of.write('  conf.run[{0}].rectifi_en = 0;  // Rectification, i.e. max(0, x) (NOTE: Can be applied after non-ReLU activation function)\n'.format(i))
@@ -915,6 +956,23 @@ class FPGANetwork(object):
             self.custom_layer_config = net.custom_layer
             self.convert_network(net)
 
+    def pad_weight_matrix(self, conv_node):
+        filter_sizew = conv_node.param.kernel_size[0]
+        filter_sizeh = conv_node.param.kernel_size[1]
+        kernel_size = get_kernel_size_for_weight(conv_node)
+        padw = kernel_size[0] - filter_sizew
+        padh = kernel_size[1] - filter_sizeh
+        if padw != 0 or padh != 0:
+            c = conv_node.input_dim[2]
+            if conv_node.param.group > 1:
+                c //= conv_node.param.group
+            m = conv_node.output_dim[2]
+            weight = conv_node.weight
+            weight.shape = (m, c, filter_sizeh, filter_sizew)
+            weight = np.pad(weight, ((0, 0), (0, 0), (padh, 0), (0, padw)),
+                            'constant')
+            conv_node.weight = weight
+
     def convert_network(self, net: cnn_layer.Network) -> None:
         tl = net.traverse_list
         converted_node = []
@@ -931,14 +989,17 @@ class FPGANetwork(object):
                 prev_node_type = None
             if (node.type is NodeType.Convolution or
                     node.type is NodeType.LRN):
+                self.pad_weight_matrix(node)
                 pass
             elif node.type is NodeType.Pooling:
                 # Test if the pool node can merge with previous convolution node
                 if (prev_node_type == NodeType.Convolution and
-                    node.param.pool == 0 and
-                    layer_start_index != -1 and
-                    calc_conv_tiles(tl[index - 1]) == 1 and
-                        calc_pool_tiles(node) == 1):
+                        node.param.pool == 0 and
+                        layer_start_index != -1 and
+                        calc_conv_tiles(tl[index - 1]) == 1 and
+                        calc_pool_tiles(node) == 1 and
+                        node in tl[index - 1].output_nodes):
+
                     index += 1
                     converted_node.append(node)
                     continue
