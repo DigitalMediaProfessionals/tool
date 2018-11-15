@@ -162,6 +162,7 @@ def merge_bn_scale(node, kernel_size, n_c, n_m):
 
 
 def calc_kmeans(weight):
+    weight.shape = (-1,)
     clusters = min(255, len(weight))
     # scikit version
 #    from sklearn.cluster import KMeans
