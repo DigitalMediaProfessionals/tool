@@ -97,7 +97,6 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
                    caffe_net.input_shape[0].dim[2],
                    caffe_net.input_shape[0].dim[1])
         node.set_input_dim(dim)
-        node.set_output_dim(dim)
         network.debug_node = caffe_net
         top_map[caffe_net.input[0]] = node
     # Handle each layer node
@@ -159,7 +158,6 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
                    layer.input_param.shape[0].dim[2],
                    layer.input_param.shape[0].dim[1])
             node.set_input_dim(dim)
-            node.set_output_dim(dim)
             network.debug_node = caffe_net
         elif node_type == NodeType.Convolution:
             param = cnn_layer.NodeParam()
