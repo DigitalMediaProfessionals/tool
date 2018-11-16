@@ -20,6 +20,7 @@ import logging
 import numpy as np
 from cnn_convertor import cnn_layer, cnn_exception, cnn_docgen
 from cnn_convertor.cnn_layer import NodeType, get_conv_out_width
+from cnn_convertor import fpga_limitation
 from enum import IntEnum, auto
 
 
@@ -958,7 +959,42 @@ class FPGANetwork(object):
         if type(net) is cnn_layer.Network:
             self.original_net = net
             self.custom_layer_config = net.custom_layer
+            self.check_limitation(net)
             self.convert_network(net)
+
+    def check_limitation(self, net: cnn_layer.Network) -> None:
+        limit = fpga_limitation.Limitation()
+        conv_types = [NodeType.Convolution, NodeType.LRN, NodeType.Pooling,
+                      NodeType.UpSampling]
+        for node in net.traverse_list:
+            if node.type in conv_types:
+                if node.input_dim[0] > limit.max_conv_width:
+                    msg = ("The input width of layer {0:s} exceeds maximum "
+                           "supported size of FPGA.").format(node.name)
+                    logging.error(msg)
+                    raise cnn_exception.ConvertError(msg)
+                if node.input_dim[1] > limit.max_conv_height:
+                    msg = ("The input height of layer {0:s} exceeds maximum "
+                           "supported size of FPGA.").format(node.name)
+                    logging.error(msg)
+                    raise cnn_exception.ConvertError(msg)
+                if node.input_dim[2] > limit.max_conv_channel:
+                    msg = ("The input channels of layer {0:s} exceeds maximum "
+                           "supported size of FPGA.").format(node.name)
+                    logging.error(msg)
+                    raise cnn_exception.ConvertError(msg)
+                kernel_size = node.param.kernel_size
+                if any([x > limit.max_conv_kernel for x in kernel_size]):
+                    msg = ("The kernel size of layer {0:s} exceeds maximum "
+                           "supported size of FPGA.").format(node.name)
+                    logging.error(msg)
+                    raise cnn_exception.ConvertError(msg)
+            if node.type is NodeType.InnerProduct:
+                if node.input_dim[-1] > limit.max_fc_channel:
+                    msg = ("The input channels of layer {0:s} exceeds maximum "
+                           "supported size of FPGA.").format(node.name)
+                    logging.error(msg)
+                    raise cnn_exception.ConvertError(msg)
 
     def pad_weight_matrix(self, conv_node):
         filter_sizew = conv_node.param.kernel_size[0]
