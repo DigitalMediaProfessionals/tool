@@ -479,11 +479,17 @@ class Network(object):
             for node in self.input_nodes:
                 new_dim = (dim[0], dim[1], node.input_dim[2])
                 node.set_input_dim(new_dim)
-                node.set_output_dim(new_dim)
 
         tr_list = self.traverse_list[:]
         for node in tr_list:
             if node.type == NodeType.Input:
+                # Detect if the input dimension is not undefined
+                if (node.input_dim[0] is None or node.input_dim[1] is None):
+                    msg = ("Network with undefined input dimension"
+                           "is not supported.")
+                    logging.exception(msg)
+                    raise cnn_exception.ConvertError(msg)
+                node.set_output_dim(node.input_dim)
                 continue
             # For Keras, DepthwiseConvolution node don't have output_size set.
             # Set it here

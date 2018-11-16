@@ -166,7 +166,6 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 else:
                     dim = (shape[2], shape[1], shape[3])
             node.set_input_dim(dim)
-            node.set_output_dim(dim)
         if is_sequential:
             input_nodes = prev_node
             up_node = prev_node
@@ -442,7 +441,6 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 else:
                     dim = (shape[2], shape[1], shape[3])
             node.set_input_dim(dim)
-            node.set_output_dim(dim)
         elif node_type == NodeType.Convolution:
             is_1D = (layer_type[-2] == '1')
             param = cnn_layer.NodeParam()
