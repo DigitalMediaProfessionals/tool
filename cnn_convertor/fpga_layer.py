@@ -472,7 +472,7 @@ def gen_header_header(of, name, custom_layer_config):
         of.write('};\n\n')
     for custom_type in custom_layer_config:
         of.write(
-            'void custom_callback_{0}(fpga_layer &layer, void *custom_param);\n\n'.format(custom_type))
+            'void custom_callback_{0}(fpga_layer &layer, void *custom_param, uint8_t *io_ptr);\n\n'.format(custom_type))
     of.write('class C{0} : public CDMP_Network '.format(name))
     of.write('{\n'
              ' private:\n')
@@ -1225,7 +1225,9 @@ class FPGANetwork(object):
                 for prev_lr in live_ranges[:index]:
                     if prev_lr.layer.node_out in lr.layer.node_in.input_nodes:
                         prev_lr.output_concat_lr = lr
-                        prev_lr.death_index = lr.death_index
+                        max_di = max(prev_lr.death_index, lr.death_index)
+                        prev_lr.death_index = max_di
+                        lr.death_index = max_di
 
         current_live_ranges = []
         allocated_size = 0
