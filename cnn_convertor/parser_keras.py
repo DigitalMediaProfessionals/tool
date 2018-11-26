@@ -35,7 +35,7 @@ def get_padding(layer, pad_map):
         return pad_map
 
 
-def set_inplace_node(node, config):
+def set_inplace_node(node, config, parsed_nodes):
     activation = config['activation']
     input_node = None
     if activation == 'relu':
@@ -53,6 +53,8 @@ def set_inplace_node(node, config):
                                   node_type, input_node)
     if input_node is None:
         node.set_activation_node(in_node)
+    else:
+        parsed_nodes.append(in_node)
 
 
 def get_weights(netweight, layer_name, need_flip, weight_entry):
@@ -479,7 +481,9 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 point_node.set_param(param)
 
             if config['activation'] != 'linear':
-                set_inplace_node(prev_node, config)
+                set_inplace_node(prev_node, config, parsed_nodes)
+                prev_node = parsed_nodes[-1]
+                node = prev_node
             if netweight is not None:
                 if layer_type[:-2] == 'SeparableConv':
                     weights = get_weights(netweight, layer_name, need_flip,
@@ -525,7 +529,9 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             param.num_output = config['units']
             node.set_param(param)
             if config['activation'] != 'linear':
-                set_inplace_node(node, config)
+                set_inplace_node(node, config, parsed_nodes)
+                prev_node = parsed_nodes[-1]
+                node = prev_node
             if netweight is not None:
                 weights = get_weights(netweight, layer_name, need_flip,
                                       ['kernel', 'bias'])
