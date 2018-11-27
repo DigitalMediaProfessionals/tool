@@ -969,30 +969,40 @@ class FPGANetwork(object):
         for node in net.traverse_list:
             if node.type in conv_types:
                 if node.input_dim[0] > limit.max_conv_width:
-                    msg = ("The input width of layer {0:s} exceeds maximum "
-                           "supported size of FPGA.").format(node.name)
+                    msg = ("The input width {1:d} of layer {0:s} "
+                           "exceeds maximum supported by FPGA {2:d}").format(
+                               node.name, node.input_dim[0],
+                               limit.max_conv_width)
                     logging.error(msg)
                     raise cnn_exception.ConvertError(msg)
                 if node.input_dim[1] > limit.max_conv_height:
-                    msg = ("The input height of layer {0:s} exceeds maximum "
-                           "supported size of FPGA.").format(node.name)
+                    msg = ("The input height {1:d} of layer {0:s} "
+                           "exceeds maximum supported by FPGA {2:d}").format(
+                               node.name, node.input_dim[1],
+                               limit.max_conv_height)
                     logging.error(msg)
                     raise cnn_exception.ConvertError(msg)
                 if node.input_dim[2] > limit.max_conv_channel:
-                    msg = ("The input channels of layer {0:s} exceeds maximum "
-                           "supported size of FPGA.").format(node.name)
+                    msg = ("The input channels {1:d} of layer {0:s} "
+                           "exceed maximum supported by FPGA {2:d}").format(
+                               node.name, node.input_dim[2],
+                               limit.max_conv_channel)
                     logging.error(msg)
                     raise cnn_exception.ConvertError(msg)
                 kernel_size = node.param.kernel_size
-                if any([x > limit.max_conv_kernel for x in kernel_size]):
-                    msg = ("The kernel size of layer {0:s} exceeds maximum "
-                           "supported size of FPGA.").format(node.name)
+                if max(kernel_size) > limit.max_conv_kernel:
+                    msg = ("The kernel size {1:d} of layer {0:s} "
+                           "exceeds maximum supported by FPGA {2:d}").format(
+                               node.name, max(kernel_size),
+                               limit.max_conv_kernel)
                     logging.error(msg)
                     raise cnn_exception.ConvertError(msg)
             if node.type is NodeType.InnerProduct:
                 if node.input_dim[-1] > limit.max_fc_channel:
-                    msg = ("The input channels of layer {0:s} exceeds maximum "
-                           "supported size of FPGA.").format(node.name)
+                    msg = ("The input channels {1:d} of layer {0:s} "
+                           "exceed maximum supported by FPGA {2:d}".format(
+                               node.name, node.input_dim[-1],
+                               limit.max_fc_channel))
                     logging.error(msg)
                     raise cnn_exception.ConvertError(msg)
 
