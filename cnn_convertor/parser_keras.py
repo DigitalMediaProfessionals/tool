@@ -482,8 +482,6 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
 
             if config['activation'] != 'linear':
                 set_inplace_node(prev_node, config, parsed_nodes)
-                prev_node = parsed_nodes[-1]
-                node = prev_node
             if netweight is not None:
                 if layer_type[:-2] == 'SeparableConv':
                     weights = get_weights(netweight, layer_name, need_flip,
@@ -530,8 +528,6 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             node.set_param(param)
             if config['activation'] != 'linear':
                 set_inplace_node(node, config, parsed_nodes)
-                prev_node = parsed_nodes[-1]
-                node = prev_node
             if netweight is not None:
                 weights = get_weights(netweight, layer_name, need_flip,
                                       ['kernel', 'bias'])
