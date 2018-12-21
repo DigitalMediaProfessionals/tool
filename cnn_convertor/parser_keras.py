@@ -156,8 +156,11 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             prev_node = node
             network.append_input_node(node)
             shape = config['batch_input_shape']
+            # handle FC only model
+            if len(shape) == 2:
+                dim = (shape[1],)
             # handle 1D input dimensions
-            if len(shape) == 3:
+            elif len(shape) == 3:
                 if is_channel_first:
                     dim = (shape[2], 1, shape[1])
                 else:

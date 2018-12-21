@@ -514,7 +514,8 @@ class Network(object):
         for node in tr_list:
             if node.type == NodeType.Input:
                 # Detect if the input dimension is not undefined
-                if (node.input_dim[0] is None or node.input_dim[1] is None):
+                if (len(node.input_dim) > 1 and
+                    (node.input_dim[0] is None or node.input_dim[1] is None)):
                     msg = ("Network with undefined input dimension"
                            "is not supported.")
                     logging.exception(msg)
