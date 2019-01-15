@@ -616,6 +616,10 @@ def gen_source_conv(of, name, n, layer, quantization):
         conv_pad = run.conv.param.pad_fpga if is_conv else 0
         conv_stride = (run.conv.param.stride[0] |
                        (run.conv.param.stride[1] << 8) if is_conv else 0x0101)
+        conv_dilation = (((run.conv.param.dilation[0] - 1) & 0xff |
+                         (run.conv.param.dilation[1] - 1) & 0xff)
+                         if is_conv else 0)
+
         pool_enable = (1 if run.pool else 0)
         pool_size = (run.pool.param.kernel_size[0] | (
             run.pool.param.kernel_size[1] << 8) if run.pool else 0)
@@ -677,7 +681,7 @@ def gen_source_conv(of, name, n, layer, quantization):
         of.write('  conf.run[{0}].weight_fmt = {1};  // Weight format (0 = random access blocks, 1 = compact stream, 3 = 8-bit qunatized stream)\n'.format(i, ((3 if quantization else 1) if is_conv else 0)))
         of.write('  conf.run[{0}].conv_pad = 0x{1:X};  // bits [7:0] = left padding, bits [15:8] = right padding, bits [23:16] = top padding, bits [31:24] = bottom padding\n'.format(i, conv_pad))
         of.write('  conf.run[{0}].conv_stride = 0x{1:X};  // bits [7:0] = X stride, bits [15:8] = Y stride\n'.format(i, conv_stride))
-        of.write('  conf.run[{0}].conv_dilation = 0x0;  // bits [7:0] = X dilation, bits [15:8] = Y dilation\n'.format(i))
+        of.write('  conf.run[{0}].conv_dilation = 0x{1:X};  // bits [7:0] = X dilation, bits [15:8] = Y dilation\n'.format(i, conv_dilation))
         of.write('  conf.run[{0}].pool_enable = {1};  // 0 = disabled, 1 = max pooling, 2 = average pooling\n'.format(i, pool_enable))
         of.write('  conf.run[{0}].pool_size = 0x{1:X};  // bits [7:0] = width, bits [15:8] = height\n'.format(i, pool_size))
         of.write('  conf.run[{0}].pool_stride = 0x{1:X};  // bits [7:0] = X stride, bits [15:8] = Y stride\n'.format(i, pool_stride))
