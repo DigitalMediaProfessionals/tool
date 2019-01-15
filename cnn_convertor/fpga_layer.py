@@ -19,7 +19,7 @@ import math
 import logging
 import numpy as np
 from cnn_convertor import cnn_layer, cnn_exception, cnn_docgen
-from cnn_convertor.cnn_layer import NodeType, get_conv_out_width
+from cnn_convertor.cnn_layer import NodeType, get_conv_out_width_floor
 from cnn_convertor import fpga_limitation
 from enum import IntEnum, auto
 
@@ -92,13 +92,16 @@ def calc_conv_tiles(node):
     p = node.param.kernel_size[0]
     pad_lrtb = node.param.pad_lrtb
     stride = node.param.stride
+    dilation = node.param.dilation
     c_blocks = (c >> 3) + (1 if c & 7 else 0)
     t = 0
     while True:
         t += 1
         tw = divup(w, t) + p - 1  # width of tile
-        ow = get_conv_out_width(tw, p, pad_lrtb[0], pad_lrtb[1], stride[0])
-        oh = get_conv_out_width(h, p, pad_lrtb[2], pad_lrtb[3], stride[1])
+        ow = get_conv_out_width_floor(tw, p, pad_lrtb[0], pad_lrtb[1],
+                                      stride[0], dilation[0])
+        oh = get_conv_out_width_floor(h, p, pad_lrtb[2], pad_lrtb[3],
+                                      stride[1], dilation[1])
         os = ow * oh * min(8, m)  # output buffer size
         ts_1c = tw * h  # tile size for single channel
         ts_blk16 = ts_1c * min(8, c)
