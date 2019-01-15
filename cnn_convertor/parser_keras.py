@@ -461,6 +461,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                                      config['kernel_size'][0])
             param.pad_lrtb = get_padding(layer, pad_map)
             param.keras_padding = config['padding']
+            param.dilation = config['dilation_rate']
             if is_1D:
                 param.stride = (config['strides'][0], 1)
             else:
