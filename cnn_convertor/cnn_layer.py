@@ -109,7 +109,6 @@ class NodeParam(object):
             self._pad[1] = int(value)
             self._pad[2] = int(value)
             self._pad[3] = int(value)
-        assert len(self._dilation) == 4
 
     @property
     def pad(self):
