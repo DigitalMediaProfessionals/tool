@@ -213,9 +213,111 @@ def get_kernel_size_for_weight(node):
     return (p, p)
 
 
-def pack_weight(node, of, quantization):
+def pack_conv_weight(node, of, quantization):
     logging.info('Packing weight for node: %s.', node.name)
+    if node.param.dilation[0] == 1 and node.param.dilation[1] == 1:
+        _pack_conv_weight_nondil(node, of, quantization)
+    else:
+        _pack_conv_weight_dil(node, of, quantization)
 
+
+def _pack_conv_weight_dil(node, of, quantization):
+    # parameters
+    n_c = node.input_dim[2]
+    if node.param.group > 1:
+        n_c = n_c // node.param.group
+    n_m = node.output_dim[2]
+    kernel_size = get_kernel_size_for_weight(node)
+
+    weight = node.weight
+    bias = node.bias
+    if weight is None or bias is None:
+        if weight is None:
+            weight = np.ones(
+                (n_m, n_c, kernel_size[1], kernel_size[0]), np.float32)
+        if bias is None:
+            bias = np.zeros((n_m,), np.float32)
+        node.set_weight_bias(weight, bias)
+    if node.bn_node is not None or node.sc_node is not None:
+        weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m)
+    if node.act_node and node.act_node.type == NodeType.PReLU:
+        prelu = node.act_node.weight
+    else:
+        prelu = None
+
+    if quantization:
+        centers, labels = calc_kmeans(weight)
+        weight_type = np.uint8
+        dsize = 1
+    else:
+        labels = weight.astype(np.float16)
+        weight_type = np.float16
+        dsize = 2
+    bias16 = bias.astype(np.float16)
+    if prelu is not None:
+        prelu16 = prelu.astype(np.float16)
+    else:
+        prelu16 = None
+    buffer = np.zeros(shape=(12, 6), dtype=weight_type)
+    labels.shape = (n_m, n_c, kernel_size[1], kernel_size[0])
+
+    offs = 0
+    if quantization:
+        centers.tofile(of)
+        offs += centers.size * dsize
+    # main: write to file
+    for y in range(node.param.kernel_size[1]):
+        for x in range(node.param.kernel_size[0]):
+            for m_start in range(0, n_m, 8):
+                m_stop = min(m_start + 8, n_m)
+                use_zero = (x != kernel_size[0]) or (y != kernel_size[1])
+
+                # Bias
+                if use_zero:
+                    of.write(b'\0\0' * 8)
+                else:
+                    bias16[m_start:m_stop].tofile(of)
+                    pad = m_start + 8 - m_stop
+                    of.write(b'\0\0' * pad)  # 32-byte align padding
+                offs += 8 * 2
+
+                # PReLU
+                if prelu16 is not None:
+                    if use_zero:
+                        of.write(b'\0\0' * 8)
+                    else:
+                        prelu16[m_start:m_stop].tofile(of)
+                        pad = m_start + 8 - m_stop
+                        of.write(b'\0\0' * pad)  # 32-byte align padding
+                    offs += 8 * 2
+
+                # Conv
+                for c_start in range(0, n_c, 8):
+                    c_stop = min(c_start + 8, n_c)
+                    for m in range(m_start, m_stop):
+                        for c in range(c_start, c_stop):
+                            t = c & 7
+                            _x = ((c & 63) >> 3) % 3
+                            _y = ((c & 63) >> 3) // 3
+                            buffer[11 - (t >> 1) * 3 - _y, (t & 1) * 3 + _x]\
+                                                        = labels[m, c, y, x]
+                        buffer.tofile(of)
+                        offs += buffer.size * dsize
+
+            # 16-byte align padding
+            if offs & 15:
+                pad = 16 - offs & 15
+                of.write(b'\0' * pad)
+                offs += pad
+
+    # final 16-byte align padding
+    if offs & 15:
+        pad = 16 - offs & 15
+        of.write(b'\0' * pad)
+        offs += pad
+
+
+def _pack_conv_weight_nondil(node, of, quantization):
     n_c = node.input_dim[2]
     if node.param.group > 1:
         n_c = n_c // node.param.group
@@ -258,13 +360,15 @@ def pack_weight(node, of, quantization):
     if kernel_size[0] == 7:
         for m_start in range(0, n_m, 8):
             m_stop = min(m_start + 8, n_m)
+
             bias16[m_start:m_stop].tofile(of)
             for i in range(m_stop, m_start + 8):
-                of.write(b'\0\0')
+                of.write(b'\0\0')  # padding
             if prelu16 is not None:
                 prelu16[m_start:m_stop].tofile(of)
                 for i in range(m_stop, m_start + 8):
-                    of.write(b'\0\0')
+                    of.write(b'\0\0')  # padding
+
             for c_start in range(0, n_c, 8):
                 c_stop = min(c_start + 8, n_c)
                 for m in range(m_start, m_stop):
@@ -277,6 +381,7 @@ def pack_weight(node, of, quantization):
                             buffer[y, 3] = labels[m, c, y + 1, 6]
                             buffer[y, 0] = labels[m, c, y + 4, 6]
                         buffer.tofile(of)
+
     elif kernel_size[0] == 5:
         for m_start in range(0, n_m, 8):
             m_stop = min(m_start + 8, n_m)
@@ -1391,7 +1496,7 @@ class FPGANetwork(object):
                 for run in layer.run:
                     if (run.conv is not None and
                             run.conv.type is NodeType.Convolution):
-                        pack_weight(run.conv, of, self.quantization)
+                        pack_conv_weight(run.conv, of, self.quantization)
             elif layer.type is LayerType.InnerProduct:
                 pack_fc_weight(layer.node_in, prev_node, of, self.quantization)
             prev_node = layer.node_out
