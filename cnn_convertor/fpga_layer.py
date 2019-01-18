@@ -258,7 +258,6 @@ def _pack_conv_weight_dil(node, of, quantization):
         prelu16 = prelu.astype(np.float16)
     else:
         prelu16 = None
-    buffer = np.zeros(shape=(12, 6), dtype=weight_type)
     labels.shape = (n_m, n_c, kernel_size[1], kernel_size[0])
 
     offs = 0
@@ -293,8 +292,9 @@ def _pack_conv_weight_dil(node, of, quantization):
                     offs += 8 * 2
 
                 # Conv
-                for c_start in range(0, n_c, 8):
-                    c_stop = min(c_start + 8, n_c)
+                for c_start in range(0, n_c, 64):
+                    c_stop = min(c_start + 64, n_c)
+                    buffer = np.zeros(shape=(12, 6), dtype=weight_type)
                     for m in range(m_start, m_stop):
                         for c in range(c_start, c_stop):
                             t = c & 7
@@ -551,8 +551,9 @@ def _get_weight_size_dil(inc, outc, kx, ky, quantization, use_prelu=False):
     @param use_prelu Flag if PReLU follows after this CONV
     """
     wsize = 512 if quantization else 0
+    _w = _get_weight_size(inc, outc, 1, quantization, use_prelu)
     for _ in range(kx * ky):
-        wsize += _get_weight_size(inc, outc, 1, quantization, use_prelu)
+        wsize += _w
         if quantization:
             wsize -= 512
         d = wsize & 15
