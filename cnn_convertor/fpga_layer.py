@@ -264,7 +264,8 @@ def _pack_conv_weight_dil(node, of, quantization):
     offs = 0
     if quantization:
         centers.tofile(of)
-        offs += centers.size * dsize
+        of.write(b'\0\0' * (256 - centers.size))
+        offs += 256 * 2
     # main: write to file
     for y in range(node.param.kernel_size[1]):
         for x in range(node.param.kernel_size[0]):
@@ -357,6 +358,7 @@ def _pack_conv_weight_nondil(node, of, quantization):
     labels.shape = (n_m, n_c, kernel_size[1], kernel_size[0])
     if quantization:
         centers.tofile(of)
+        of.write(b'\0\0' * (256 - centers.size))
     if kernel_size[0] == 7:
         for m_start in range(0, n_m, 8):
             m_stop = min(m_start + 8, n_m)
