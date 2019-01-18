@@ -403,31 +403,76 @@ def pack_fc_weight(node, conv_node, of, quantization):
         offs += 16 - d
 
 
+def _get_weight_size(inc, outc, kernel, quantization, use_prelu):
+    """
+    get weight size of non-dilation convolution
+    @param inc # of input channels
+    @param outc # of output channels
+    @param kernel Krenel size: max(kx, ky) | 1
+    @param quantization Flag if quantization is enabled or not
+    @param use_prelu Flag if PReLU follows after this CONV
+    """
+    if kernel == 7:
+        pass
+    if kernel == 5:
+        inc = inc // 2 + inc % 2
+    if kernel == 3:
+        inc = inc // 8 + (0 if inc % 8 == 0 else 1)
+    if kernel == 1:
+        inc = inc // 64 + (0 if inc % 64 == 0 else 1)
+
+    if quantization:
+        wsize = 512 + 72 * outc * inc + 16 * ((outc + 7) // 8)
+        wsize = (wsize + 0xf) & (~0xf)  # align to 16 bytes
+    else:
+        wsize = 144 * outc * inc + 16 * ((outc + 7) // 8)
+
+    # add PReLU parameter size
+    if use_prelu:
+        wsize += 16 * ((outc + 7) // 8)
+    return wsize
+
+
+def _get_weight_size_dil(inc, outc, kx, ky, quantization, use_prelu=False):
+    """
+    get weight size of dilation convolution
+    @param inc # of input channels
+    @param outc # of output channels
+    @param kx Kernel size in x axis
+    @param ky Kernel size in y axis
+    @param quantization Flag if quantization is enabled or not
+    @param use_prelu Flag if PReLU follows after this CONV
+    """
+    wsize = 512 if quantization else 0
+    for _ in range(kx * ky):
+        wsize += _get_weight_size(inc, outc, 1, quantization, use_prelu)
+        if quantization:
+            wsize -= 512
+        d = wsize & 15
+        if d:
+            wsize += 16 - d
+
+    return wsize
+
+
 def get_weight_size(node, quantization):
     if node is None or node.type is not NodeType.Convolution:
         return 0
-    c = node.input_dim[2]
+
+    inc = node.input_dim[2]
     if node.param.group > 1:
-        c //= node.param.group
-    m = node.output_dim[2]
-    k = get_kernel_size_for_weight(node)
-    if k[0] == 7:
-        pass
-    if k[0] == 5:
-        c = c // 2 + c % 2
-    if k[0] == 3:
-        c = c // 8 + (0 if c % 8 == 0 else 1)
-    if k[0] == 1:
-        c = c // 64 + (0 if c % 64 == 0 else 1)
-    if quantization:
-        weight_size = 512 + 72 * m * c + 16 * ((m + 7) // 8)
-        weight_size = (weight_size + 0xf) & (~0xf)  # align to 16 bytes
+        inc //= node.param.group
+    outc = node.output_dim[2]
+    use_prelu = node.act_node and node.act_node.type == NodeType.PReLU
+
+    if node.param.dilation[0] == 1 and node.param.dilation[1] == 1:
+        kernel = get_kernel_size_for_weight(node)
+        return _get_weight_size(inc, outc, kernel[0],
+                                quantization, use_prelu)
     else:
-        weight_size = 144 * m * c + 16 * ((m + 7) // 8)
-    # add PReLU parameter size
-    if node.act_node and node.act_node.type == NodeType.PReLU:
-        weight_size += 16 * ((m + 7) // 8)
-    return weight_size
+        return _get_weight_size_dil(inc, outc, node.param.kernel_size[0],
+                                    node.param.kernel_size[1], quantization,
+                                    use_prelu)
 
 
 def get_fc_weight_size(node, quantization):
