@@ -769,8 +769,8 @@ def gen_source_conv(of, name, n, layer, quantization):
         conv_pad = run.conv.param.pad_fpga if is_conv else 0
         conv_stride = (run.conv.param.stride[0] |
                        (run.conv.param.stride[1] << 8) if is_conv else 0x0101)
-        conv_dilation = (((run.conv.param.dilation[0] - 1) & 0xff |
-                         (run.conv.param.dilation[1] - 1) & 0xff)
+        conv_dilation = ((run.conv.param.dilation[0] & 0xff |
+                         ((run.conv.param.dilation[1] & 0xff) << 8))
                          if is_conv else 0)
 
         pool_enable = (1 if run.pool else 0)
