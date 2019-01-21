@@ -1094,6 +1094,8 @@ class FPGALayer(object):
                 topo |= (1 << i)
             if run.conv is not None:
                 tiles = calc_conv_tiles(run.conv)
+                if tiles != 1:
+                    topo |= (1 << i)
                 max_tiles = max(tiles, max_tiles)
                 if run.pool is not None:
                     tiles = calc_pool_tiles(run.pool)
