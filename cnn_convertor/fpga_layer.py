@@ -1295,7 +1295,7 @@ class FPGANetwork(object):
                             else:
                                 run_depth = 100
                             node_out = node_out.output_nodes[0]
-                        if run_depth > 2:
+                        if run_depth > 2 or run_depth == 0:
                             can_merge = False
                             break
                     # test if all channels of input nodes are dividable by 8
