@@ -33,7 +33,7 @@ node_layer_name=''
 
 node_layer_name_pre=''
 
-import googlenet_custom_layers
+import cnn_convertor.googlenet_custom_layers as googlenet_custom_layers
 try:
     import keras_applications
 except: 
