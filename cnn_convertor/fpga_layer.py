@@ -227,7 +227,7 @@ def _pack_conv_weight_dil(node, of, quantization):
     if node.param.group > 1:
         n_c = n_c // node.param.group
     n_m = node.output_dim[2]
-    kernel_size = get_kernel_size_for_weight(node)
+    kernel_size = node.param.kernel_size[:]
 
     weight = node.weight
     bias = node.bias
@@ -266,29 +266,26 @@ def _pack_conv_weight_dil(node, of, quantization):
         of.write(b'\0\0' * (256 - centers.size))
         offs += 256 * 2
     # main: write to file
-    for y in range(node.param.kernel_size[1]):
-        for x in range(node.param.kernel_size[0]):
+    for y in range(kernel_size[1]):
+        for x in range(kernel_size[0]):
             for m_start in range(0, n_m, 8):
                 m_stop = min(m_start + 8, n_m)
-                use_zero = (x != kernel_size[0]) or (y != kernel_size[1])
+                use_zero = ((x != kernel_size[0] - 1) or
+                            (y != kernel_size[1] - 1))
 
-                # Bias
-                if use_zero:
-                    of.write(b'\0\0' * 8)
-                else:
-                    bias16[m_start:m_stop].tofile(of)
-                    pad = m_start + 8 - m_stop
-                    of.write(b'\0\0' * pad)  # 32-byte align padding
-                offs += 8 * 2
-
-                # PReLU
-                if prelu16 is not None:
+                def _write_bias(b):
                     if use_zero:
                         of.write(b'\0\0' * 8)
                     else:
-                        prelu16[m_start:m_stop].tofile(of)
+                        b[m_start:m_stop].tofile(of)
                         pad = m_start + 8 - m_stop
                         of.write(b'\0\0' * pad)  # 32-byte align padding
+
+                # Bias and PReLU
+                _write_bias(bias16)
+                offs += 8 * 2
+                if prelu16 is not None:
+                    _write_bias(prelu16)
                     offs += 8 * 2
 
                 # Conv
