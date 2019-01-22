@@ -34,7 +34,7 @@ def get_padding(layer, pad_map):
         return pad_map
 
 
-def set_inplace_node(node, config):
+def set_inplace_node(node, config, parsed_nodes):
     activation = config['activation']
     input_node = None
     if activation == 'relu':
@@ -52,6 +52,8 @@ def set_inplace_node(node, config):
                                   node_type, input_node)
     if input_node is None:
         node.set_activation_node(in_node)
+    else:
+        parsed_nodes.append(in_node)
 
 
 def get_weights(netweight, layer_name, need_flip, weight_entry):
@@ -155,8 +157,11 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             prev_node = node
             network.append_input_node(node)
             shape = config['batch_input_shape']
+            # handle FC only model
+            if len(shape) == 2:
+                dim = (shape[1],)
             # handle 1D input dimensions
-            if len(shape) == 3:
+            elif len(shape) == 3:
                 if is_channel_first:
                     dim = (shape[2], 1, shape[1])
                 else:
@@ -167,7 +172,6 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 else:
                     dim = (shape[2], shape[1], shape[3])
             node.set_input_dim(dim)
-            node.set_output_dim(dim)
         if is_sequential:
             input_nodes = prev_node
             up_node = prev_node
@@ -443,7 +447,6 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 else:
                     dim = (shape[2], shape[1], shape[3])
             node.set_input_dim(dim)
-            node.set_output_dim(dim)
         elif node_type == NodeType.Convolution:
             is_1D = (layer_type[-2] == '1')
             param = cnn_layer.NodeParam()
@@ -482,7 +485,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 point_node.set_param(param)
 
             if config['activation'] != 'linear':
-                set_inplace_node(prev_node, config)
+                set_inplace_node(prev_node, config, parsed_nodes)
             if netweight is not None:
                 if layer_type[:-2] == 'SeparableConv':
                     weights = get_weights(netweight, layer_name, need_flip,
@@ -528,7 +531,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             param.num_output = config['units']
             node.set_param(param)
             if config['activation'] != 'linear':
-                set_inplace_node(node, config)
+                set_inplace_node(node, config, parsed_nodes)
             if netweight is not None:
                 weights = get_weights(netweight, layer_name, need_flip,
                                       ['kernel', 'bias'])

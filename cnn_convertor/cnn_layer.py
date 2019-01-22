@@ -75,6 +75,36 @@ class NodeParam(object):
         self.custom_param = None
         self.scale = 1.0
         self.split_pool_divisor = None
+        self._dilation = [0, 0]
+
+    @property
+    def dilation(self):
+        assert len(self._dilation) == 2
+        return self._dilation
+
+    @dilation.setter
+    def dilation(self, value):
+        assert len(self._dilation) == 2
+        try:
+            assert all(int(x) == x for x in value)
+            if len(value) == 2:
+                self._dilation[0] = int(value[0])
+                self._dilation[1] = int(value[1])
+            elif len(value) == 1:
+                self._dilation[0] = int(value[0])
+                self._dilation[1] = int(value[0])
+            elif len(value) == 0:
+                self._dilation[0] = 0
+                self._dilation[1] = 0
+            else:
+                raise ValueError("Invalid value for dilation: %s" % value)
+        except TypeError:
+            assert int(value) == value
+            self._pad[0] = int(value)
+            self._pad[1] = int(value)
+            self._pad[2] = int(value)
+            self._pad[3] = int(value)
+        assert len(self._dilation) == 4
 
     @property
     def pad(self):
@@ -483,11 +513,18 @@ class Network(object):
             for node in self.input_nodes:
                 new_dim = (dim[0], dim[1], node.input_dim[2])
                 node.set_input_dim(new_dim)
-                node.set_output_dim(new_dim)
 
         tr_list = self.traverse_list[:]
         for node in tr_list:
             if node.type == NodeType.Input:
+                # Detect if the input dimension is not undefined
+                if (len(node.input_dim) > 1 and
+                    (node.input_dim[0] is None or node.input_dim[1] is None)):
+                    msg = ("Network with undefined input dimension"
+                           "is not supported.")
+                    logging.exception(msg)
+                    raise cnn_exception.ConvertError(msg)
+                node.set_output_dim(node.input_dim)
                 continue
             # For Keras, DepthwiseConvolution node don't have output_size set.
             # Set it here

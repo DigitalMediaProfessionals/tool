@@ -20,6 +20,7 @@ import logging
 import numpy as np
 from cnn_convertor import cnn_layer, cnn_exception, cnn_docgen
 from cnn_convertor.cnn_layer import NodeType, get_conv_out_width
+from cnn_convertor import fpga_limitation
 from enum import IntEnum, auto
 
 
@@ -162,6 +163,7 @@ def merge_bn_scale(node, kernel_size, n_c, n_m):
 
 
 def calc_kmeans(weight):
+    weight.shape = (-1,)
     clusters = min(255, len(weight))
     # scikit version
 #    from sklearn.cluster import KMeans
@@ -467,7 +469,7 @@ def gen_header_header(of, name, custom_layer_config):
         of.write('};\n\n')
     for custom_type in custom_layer_config:
         of.write(
-            'void custom_callback_{0}(fpga_layer &layer, void *custom_param);\n\n'.format(custom_type))
+            'void custom_callback_{0}(fpga_layer &layer, void *custom_param, uint8_t *io_ptr);\n\n'.format(custom_type))
     of.write('class C{0} : public CDMP_Network '.format(name))
     of.write('{\n'
              ' private:\n')
@@ -954,7 +956,52 @@ class FPGANetwork(object):
         if type(net) is cnn_layer.Network:
             self.original_net = net
             self.custom_layer_config = net.custom_layer
+            self.check_limitation(net)
             self.convert_network(net)
+
+    def check_limitation(self, net: cnn_layer.Network) -> None:
+        limit = fpga_limitation.Limitation()
+        conv_types = [NodeType.Convolution, NodeType.LRN, NodeType.Pooling,
+                      NodeType.UpSampling]
+        for node in net.traverse_list:
+            if node.type in conv_types:
+                if node.input_dim[0] > limit.max_conv_width:
+                    msg = ("The input width {1:d} of layer {0:s} "
+                           "exceeds maximum supported by FPGA {2:d}").format(
+                               node.name, node.input_dim[0],
+                               limit.max_conv_width)
+                    logging.error(msg)
+                    raise cnn_exception.ConvertError(msg)
+                if node.input_dim[1] > limit.max_conv_height:
+                    msg = ("The input height {1:d} of layer {0:s} "
+                           "exceeds maximum supported by FPGA {2:d}").format(
+                               node.name, node.input_dim[1],
+                               limit.max_conv_height)
+                    logging.error(msg)
+                    raise cnn_exception.ConvertError(msg)
+                if node.input_dim[2] > limit.max_conv_channel:
+                    msg = ("The input channels {1:d} of layer {0:s} "
+                           "exceed maximum supported by FPGA {2:d}").format(
+                               node.name, node.input_dim[2],
+                               limit.max_conv_channel)
+                    logging.error(msg)
+                    raise cnn_exception.ConvertError(msg)
+                kernel_size = node.param.kernel_size
+                if max(kernel_size) > limit.max_conv_kernel:
+                    msg = ("The kernel size {1:d} of layer {0:s} "
+                           "exceeds maximum supported by FPGA {2:d}").format(
+                               node.name, max(kernel_size),
+                               limit.max_conv_kernel)
+                    logging.error(msg)
+                    raise cnn_exception.ConvertError(msg)
+            if node.type is NodeType.InnerProduct:
+                if node.input_dim[-1] > limit.max_fc_channel:
+                    msg = ("The input channels {1:d} of layer {0:s} "
+                           "exceed maximum supported by FPGA {2:d}".format(
+                               node.name, node.input_dim[-1],
+                               limit.max_fc_channel))
+                    logging.error(msg)
+                    raise cnn_exception.ConvertError(msg)
 
     def pad_weight_matrix(self, conv_node):
         filter_sizew = conv_node.param.kernel_size[0]
@@ -1185,7 +1232,9 @@ class FPGANetwork(object):
                 for prev_lr in live_ranges[:index]:
                     if prev_lr.layer.node_out in lr.layer.node_in.input_nodes:
                         prev_lr.output_concat_lr = lr
-                        prev_lr.death_index = lr.death_index
+                        max_di = max(prev_lr.death_index, lr.death_index)
+                        prev_lr.death_index = max_di
+                        lr.death_index = max_di
 
         current_live_ranges = []
         allocated_size = 0
