@@ -1088,7 +1088,8 @@ class FPGALayer(object):
                 node_out = run.pool
             if (node_out == self.node_out or
                     (concat_node and node_out in concat_node.input_nodes) or
-                    any(x != 1 for x in run.conv.param.dilation[0:2])):
+                    (run.conv is not None and
+                        any(x != 1 for x in run.conv.param.dilation[0:2]))):
                 topo |= (1 << i)
             if run.conv is not None:
                 tiles = calc_conv_tiles(run.conv)
