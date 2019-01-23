@@ -725,7 +725,6 @@ def gen_source_conv(of, name, n, layer, quantization):
             layer_names.append(run.pool.name)
     of.write('void C{0}::Layer_{1}() '.format(name, n))
     of.write('{\n')
-    of.write('  get_layer({0}).name = "{1}";\n'.format(n, ", ".join(layer_names)))
     of.write('  dmp_dv_cmdraw_conv_v0& conf = get_layer({0}).conv_conf;\n'.format(n))
     of.write('  conf.header.size = sizeof(conf);\n')
     of.write('  conf.header.device_type = DMP_DV_DEV_CONV;\n')
@@ -871,7 +870,6 @@ def gen_source_fc(of, name, n, layer, quantization):
     of.write('//	->: {0}\n'.format(node.name))
     of.write('void C{0}::Layer_{1}() '.format(name, n))
     of.write('{\n')
-    of.write('  get_layer({0}).name = "{1}";\n'.format(n, node.name))
     of.write('  dmp_dv_cmdraw_fc_v0& conf = get_layer({0}).fc_conf;\n'.format(n))
     of.write('  conf.header.size = sizeof(conf);\n')
     of.write('  conf.header.version = 0;\n')
@@ -947,6 +945,7 @@ def gen_source_layer(of, name, n, layer, quantization):
         of.write('  };\n\n')
 
     of.write('  fpga_layer& layer = get_layer({0});\n'.format(n))
+    of.write('  layer.name = "{0}";\n'.format(layer.node_out.name))
     of.write('  layer.type = {0};\n'.format(type_map[layer.type]))
     of.write('  layer.input_offs = {0};\n'.format(
         layer.layer_in[0].output_addr_offset))
