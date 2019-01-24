@@ -1355,7 +1355,7 @@ class FPGANetwork(object):
         """Set layer output addresses."""
         logging.info('Converted layer info')
         logging.info("{:22s} {:22s} {:12s} {:5s} {:18s} {:8s} {:s}".format(
-            'Input Node', 'Output Node', 'Node Type', 'Range',
+            'Input Node', 'Output Node', 'Node Type', 'Live Range',
             'Output Dimension', 'Addr', 'Size'))
 
         class LayerLiveRange(object):
@@ -1368,23 +1368,29 @@ class FPGANetwork(object):
         live_ranges = []
         weight_size = 0
         for index, layer in enumerate(self.layer):
+            # calc weight and increment the counter
             if layer.type is LayerType.Convolution:
                 self.num_conv_layers += 1
                 for run in layer.run:
                     weight_size += get_weight_size(run.conv, self.quantization)
             elif layer.type is LayerType.InnerProduct:
                 self.num_fc_layers += 1
-                weight_size += get_fc_weight_size(layer.node_in, self.quantization)
+                weight_size += get_fc_weight_size(layer.node_in,
+                                                  self.quantization)
+
+            # add to output_layer
             if layer.is_output:
                 self.num_output_layers += 1
                 self.output_layer.append(layer)
+
+            # create LayerLiveRange
             lr = LayerLiveRange(layer, index)
-            for node_in in layer.node_in.input_nodes:
-                for lr_in in live_ranges:
-                    if node_in is lr_in.layer.node_out:
-                        lr.layer.layer_in.append(lr_in.layer)
-                        if lr_in.death_index < index:
-                            lr_in.death_index = index
+            for node_in, lr_in in itertools.product(layer.node_in.input_nodes,
+                                                    live_ranges):
+                if node_in is lr_in.layer.node_out:
+                    lr.layer.layer_in.append(lr_in.layer)
+                    if lr_in.death_index < index:
+                        lr_in.death_index = index
             if lr.layer.is_output:
                 lr.death_index = len(self.layer) - 1
             live_ranges.append(lr)
