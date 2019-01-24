@@ -21,6 +21,7 @@ from keras import backend as K
 from keras.backend.tensorflow_backend import set_session
 keras.backend.clear_session()
 config = tf.ConfigProto()
+
 config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
 config.log_device_placement = True  # to log device placement (on which device the operation ran)
                                     # (nothing gets printed in Jupyter, only if you run it standalone)
@@ -493,7 +494,7 @@ def layer_split(fpga_network, network_def, **kwargs):
 					node_layer_inputs=node_layer_inputs[0]
 
 
-				if ((node_layer.type.name == 'Pooling') and (len(node_layer.input_nodes)==1) and (node_input_dim!=keras_input_shape[1:]) 
+				if ( (len(node_layer.input_nodes)==1) and (node_input_dim!=keras_input_shape[1:]) 
 					and (keras_layer._inbound_nodes[0].inbound_layers[0].__class__.__name__=='ZeroPadding2D')):
 					
 					pad_layer_name = keras_layer._inbound_nodes[0].inbound_layers[0].name
@@ -504,24 +505,29 @@ def layer_split(fpga_network, network_def, **kwargs):
 					with CustomObjectScope(custom_objects):
 						keras_layers[node_layer_name] = pad_layer_class(**pad_layer_config)(node_layer_inputs)
 						keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
+				
 
 				else:
 					with CustomObjectScope(custom_objects):
 						keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(node_layer_inputs)
 						# keras_out_layer.set_weights(keras_layer.get_weights())
+						
 				
 				if node_layer.bn_node:
 					sub_layer_name = node_layer.bn_node.name
-					keras_layer = model_load.get_layer(sub_layer_name)
-					keras_layer_class = keras_layer.__class__
-					keras_layer_config = keras_layer.get_config()
-					if re.search('FusedBatchNorm', keras_layer.output.name):
-						with CustomObjectScope(custom_objects):
-							keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name], training=True)
+					if sub_layer_name == node_layer_name:
+						pass
 					else:
-						with CustomObjectScope(custom_objects):
-							keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
-						# keras_out_layer.set_weights(keras_layer.get_weights())
+						keras_layer = model_load.get_layer(sub_layer_name)
+						keras_layer_class = keras_layer.__class__
+						keras_layer_config = keras_layer.get_config()
+						if re.search('FusedBatchNorm', keras_layer.output.name):
+							with CustomObjectScope(custom_objects):
+								keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name], training=True)
+						else:
+							with CustomObjectScope(custom_objects):
+								keras_layers[node_layer_name] = keras_layer_class(**keras_layer_config)(keras_layers[node_layer_name])
+							# keras_out_layer.set_weights(keras_layer.get_weights())
 
 				if node_layer.act_node:
 					sub_layer_name = node_layer.act_node.name
