@@ -1407,45 +1407,49 @@ class FPGANetwork(object):
                         prev_lr.death_index = max_di
                         lr.death_index = max_di
 
-        current_live_ranges = []
-        allocated_size = 0
+        def get_dst_concat_lr(lr):
+            """
+            search final concat node Life Range
+            If lr.output_concat_lr is None, lr is returned.
+            """
+            _lr = lr
+            while _lr.output_concat_lr:
+                _lr = _lr.output_concat_lr
+            return _lr
 
-        for index, lr in enumerate(live_ranges):
-            necessary_size = make_align_size(lr.layer.node_out.output_size)
+        allocated_size = 0  # size to be allocated
+        for index, lr in enumerate(reversed(live_ranges)):
+            index = len(live_ranges) - 1 - index
+
             if lr.output_concat_lr:
                 offset = 0
                 for node in lr.output_concat_lr.layer.node_in.input_nodes:
                     if node == lr.layer.node_out:
                         break
                     offset += node.output_size
-                if lr.output_concat_lr.allocated:
-                    lr.allocated = True
-                    lr.layer.output_addr_offset = (
-                        lr.output_concat_lr.layer.output_addr_offset + offset)
-                else:
-                    necessary_size = make_align_size(
-                        lr.output_concat_lr.layer.node_out.output_size)
+                lr.layer.output_addr_offset = lr.output_concat_lr.layer.output_addr_offset + offset
+                lr.allocated = True
 
-            # update current live ranges
-            for clr in current_live_ranges[:]:
-                if clr.death_index < index:
-                    current_live_ranges.remove(clr)
-
+            necessary_size = make_align_size(lr.layer.node_out.output_size)
             if not lr.allocated:
+                current_live_ranges = [_lr for _lr in live_ranges
+                                       if _lr.birth_index - 1
+                                       <= index <= _lr.death_index]
+
                 # find if can re-use empty spaces in current live ranges
-                layer_allocated = False
+                empty_found = False
                 current_offset = 0
-                for i, clr in enumerate(current_live_ranges):
-                    if (clr.layer.output_addr_offset - current_offset >=
-                            necessary_size):
-                        layer_allocated = True
+                for clr in reversed(current_live_ranges):
+                    if not clr.allocated:
+                        continue
+
+                    empty_found = (clr.layer.output_addr_offset
+                                   - current_offset >= necessary_size)
+                    if empty_found:
                         lr.layer.output_addr_offset = current_offset
-                        if lr.output_concat_lr:
-                            current_live_ranges.insert(i, lr.output_concat_lr)
-                        else:
-                            current_live_ranges.insert(i, lr)
                         break
                     else:
+                        # to next, update current_offset
                         increment_size = make_align_size(
                             clr.layer.node_out.output_size)
                         if clr.output_concat_lr:
@@ -1455,21 +1459,13 @@ class FPGANetwork(object):
                                           increment_size)
 
                 # if not, put it in the end of current buffer
-                if not layer_allocated:
-                    if lr.output_concat_lr:
-                        current_live_ranges.append(lr.output_concat_lr)
-                    else:
-                        current_live_ranges.append(lr)
+                if not empty_found:
                     lr.layer.output_addr_offset = current_offset
                     if current_offset + necessary_size > allocated_size:
                         allocated_size = current_offset + necessary_size
-
                 lr.allocated = True
-                if lr.output_concat_lr and not lr.output_concat_lr.allocated:
-                    lr.output_concat_lr.allocated = True
-                    lr.output_concat_lr.layer.output_addr_offset = lr.layer.output_addr_offset
-                    lr.layer.output_addr_offset += offset
 
+        for lr in live_ranges:
             logging.info("{:22s} {:22s} {:12s} {:02d} {:02d} {:18s} {:08X} {:08X}{:s}".format(
                 lr.layer.node_in.name, lr.layer.node_out.name,
                 str(lr.layer.type),
