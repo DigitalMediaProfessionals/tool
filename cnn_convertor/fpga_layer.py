@@ -18,6 +18,7 @@ import os
 import math
 import logging
 import numpy as np
+import itertools
 from cnn_convertor import cnn_layer, cnn_exception, cnn_docgen
 from cnn_convertor.cnn_layer import NodeType, get_conv_out_width_floor
 from cnn_convertor import fpga_limitation
@@ -1395,8 +1396,9 @@ class FPGANetwork(object):
                 lr.death_index = len(self.layer) - 1
             live_ranges.append(lr)
 
-        # handle concat layer
-        for index, lr in enumerate(live_ranges):
+        # handle concat layer and update live_ranges
+        for index, lr in enumerate(reversed(live_ranges)):
+            index = len(live_ranges) - 1 - index
             if lr.layer.type is LayerType.Concatenate:
                 for prev_lr in live_ranges[:index]:
                     if prev_lr.layer.node_out in lr.layer.node_in.input_nodes:
