@@ -896,6 +896,7 @@ def _is_input_hw_layout(layer):
         elif inl.type is LayerType.Concatenate:
             if _is_input_hw_layout(inl):
                 return True
+            # TODO: raise exception if multipe layouts exists in input
 
     return False
 
@@ -1408,15 +1409,33 @@ class FPGANetwork(object):
             live_ranges.append(lr)
 
         # handle concat layer and update live_ranges
+        def _lr_is_partof_concat(lr, concat_lr):
+            if concat_lr.layer.type is not LayerType.Concatenate:
+                return False
+            while lr:
+                if lr is concat_lr:
+                    return True
+                lr = lr.output_concat_lr
+            return False
+
         for index, lr in enumerate(reversed(live_ranges)):
-            index = len(live_ranges) - 1 - index
+            index = len(live_ranges) - index
             if lr.layer.type is LayerType.Concatenate:
                 for prev_lr in live_ranges[:index]:
                     if prev_lr.layer.node_out in lr.layer.node_in.input_nodes:
                         prev_lr.output_concat_lr = lr
+
+        for index, lr in enumerate(reversed(live_ranges)):
+            index = len(live_ranges) - index
+            if lr.layer.type is LayerType.Concatenate:
+                for prev_lr in live_ranges[:index]:
+                    if _lr_is_partof_concat(prev_lr, lr):
                         max_di = max(prev_lr.death_index, lr.death_index)
                         prev_lr.death_index = max_di
                         lr.death_index = max_di
+                        min_di = min(prev_lr.birth_index, lr.birth_index)
+                        prev_lr.birth_index = min_di
+                        lr.birth_index = min_di
 
         def get_dst_concat_lr(lr):
             """
@@ -1446,11 +1465,14 @@ class FPGANetwork(object):
                 current_live_ranges = [_lr for _lr in live_ranges
                                        if _lr.birth_index - 1
                                        <= index <= _lr.death_index]
+                current_live_ranges = sorted(
+                                    current_live_ranges,
+                                    key=(lambda x: x.layer.output_addr_offset))
 
                 # find if can re-use empty spaces in current live ranges
                 empty_found = False
                 current_offset = 0
-                for clr in reversed(current_live_ranges):
+                for clr in current_live_ranges:
                     if not clr.allocated:
                         continue
 
