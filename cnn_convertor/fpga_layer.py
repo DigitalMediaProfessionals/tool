@@ -889,6 +889,17 @@ def gen_source_fc(of, name, n, layer, quantization):
     weight_offset += size
 
 
+def _is_input_hw_layout(layer):
+    for inl in layer.layer_in:
+        if inl.type is LayerType.Convolution:
+            return True
+        elif inl.type is LayerType.Concatenate:
+            if _is_input_hw_layout(inl):
+                return True
+
+    return False
+
+
 def gen_source_layer(of, name, n, layer, quantization):
     global output_index
     type_map = {LayerType.Input: 'LT_INPUT',
@@ -967,7 +978,7 @@ def gen_source_layer(of, name, n, layer, quantization):
     for d in layer.node_out.output_dim:
         osize *= d
     of.write('  layer.is_f32_output = {0};\n'.format('true' if layer.node_out.output_size / osize == 4 else 'false'))
-    of.write('  layer.is_input_hw_layout = {0};\n'.format('true' if layer.layer_in[0].type is LayerType.Convolution else 'false'))
+    of.write('  layer.is_input_hw_layout = {0};\n'.format('true' if _is_input_hw_layout(layer) else 'false'))
     if layer.type is LayerType.SoftMax:
         axis = layer.node_in.param.axis
         if axis < 0:
