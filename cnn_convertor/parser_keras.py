@@ -25,17 +25,7 @@ import numpy as np
 NodeType = cnn_layer.NodeType
 
 
-def get_padding(layer, pad_map):
-    if type(pad_map) == dict:
-        pad_name = layer['inbound_nodes'][0][0][0]
-        if pad_name in pad_map:
-            return pad_map[pad_name]
-        return [0, 0, 0, 0]
-    else:
-        return pad_map
-
-
-def set_inplace_node(node, config, parsed_nodes):
+def set_inplace_node(node, config):
     activation = config['activation']
     input_node = None
     if activation == 'relu':
@@ -53,8 +43,9 @@ def set_inplace_node(node, config, parsed_nodes):
                                   node_type, input_node)
     if input_node is None:
         node.set_activation_node(in_node)
+        return None
     else:
-        parsed_nodes.append(in_node)
+        return in_node
 
 
 def get_weights(netweight, layer_name, need_flip, weight_entry):
@@ -117,6 +108,9 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
         'Softmax': NodeType.SoftMax,
         'Flatten': NodeType.Flatten,
         'Reshape': NodeType.Reshape,
+        'Dropout': NodeType.DropOut,
+        'ZeroPadding1D': NodeType.Padding,
+        'ZeroPadding2D': NodeType.Padding,
     }
     netdef = json.loads(net_def)
     is_sequential = (netdef['class_name'] == 'Sequential')
@@ -135,14 +129,8 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 is_channel_first = False
             break
 
-    top_map = {}
-    if is_sequential:
-        pad_map = [0, 0, 0, 0]
-    else:
-        pad_map = {}
-    prev_node = None
+    node_map = OrderedDict()
     # Handle each layer node
-    parsed_nodes = []
     for i, layer in enumerate(layers):
         layer_type = layer['class_name']
         config = layer['config']
@@ -153,7 +141,6 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
         # if the first node is not input node, create a dummy input node
         if i == 0 and layer_type != 'InputLayer':
             node = cnn_layer.LayerNode('Input', NodeType.Input, None)
-            prev_node = node
             network.append_input_node(node)
             shape = config['batch_input_shape']
             # handle FC only model
@@ -171,21 +158,23 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 else:
                     dim = (shape[2], shape[1], shape[3])
             node.set_input_dim(dim)
+            node_map[""] = node
+
         if is_sequential:
-            input_nodes = prev_node
-            up_node = prev_node
+            input_nodes = node_map.values()[-1]
         else:
             # search for exsisting input and output nodes
             input_nodes = []
             if len(layer['inbound_nodes']) > 0:
                 inbound_nodes = [x[0] for x in layer['inbound_nodes'][0]]
                 for label in inbound_nodes:
-                    if label in top_map:
-                        input_nodes.append(top_map[label])
-                up_node = input_nodes[0]
+                    if label in node_map:
+                        input_nodes.append(node_map[label])
 
         if (layer_type == 'Dropout'):
-            top_map[layer_name] = up_node
+            top_map[layer_name] = cnn_layer.LayerNode(layer_name,
+                                                      NodeType.DropOut,
+                                                      input_nodes)
             continue
         elif layer_type == 'Activation':
             activation = config['activation']
@@ -202,9 +191,8 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     node_type = NodeType.ELU
                 elif activation == 'relu6':
                     node_type = NodeType.ReLU6
-                node = cnn_layer.LayerNode(layer_name, node_type)
-                up_node.set_activation_node(node)
-                top_map[layer_name] = up_node
+                node = cnn_layer.LayerNode(layer_name, node_type, input_nodes)
+                node_map[layer_name] = node
                 continue
         elif layer_type == 'ReLU':
             if 'threshold' in config and config['threshold'] != 0.0:
@@ -219,21 +207,19 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             else:
                 logging.error('ReLU layer with unsupported parameters.')
                 raise cnn_exception.ParseError('Unsupported Layer')
-            node = cnn_layer.LayerNode(layer_name, node_type)
+            node = cnn_layer.LayerNode(layer_name, node_type, input_nodes)
             if 'negative_slope' in config:
                 param = cnn_layer.NodeParam()
                 param.relu_param = config['negative_slope']
                 node.set_param(param)
-            up_node.set_activation_node(node)
-            top_map[layer_name] = up_node
+            node_map[layer_name] = node
             continue
         elif layer_type == 'LeakyReLU':
-            node = cnn_layer.LayerNode(layer_name, NodeType.ReLU)
+            node = cnn_layer.LayerNode(layer_name, NodeType.ReLU, input_nodes)
             param = cnn_layer.NodeParam()
             param.relu_param = config['alpha']
             node.set_param(param)
-            up_node.set_activation_node(node)
-            top_map[layer_name] = up_node
+            node_map[layer_name] = node
             continue
         elif layer_type == 'PReLU':
             # check if it is using shared axis for width and height axes
@@ -243,49 +229,28 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 shared_axes = None
             if (is_channel_first and shared_axes == [2, 3] or
                     not is_channel_first and shared_axes == [1, 2]):
-                node = cnn_layer.LayerNode(layer_name, NodeType.PReLU)
+                node = cnn_layer.LayerNode(layer_name, NodeType.PReLU,
+                                           input_nodes)
                 if netweight is not None:
                     weights = get_weights(netweight, layer_name, need_flip,
                                           ['alpha'])
                     node.set_weight_bias(weights[0], None)
-                up_node.set_activation_node(node)
-                top_map[layer_name] = up_node
+                node_map[layer_name] = node
             else:
                 logging.error('PReLU layer must set its shared_axes to'
                               'width and height axes.')
                 raise cnn_exception.ParseError('Unsupported Layer')
             continue
         elif layer_type == 'BatchNormalization':
-            # handle case that the up_node is not a convolution node
-            if up_node is None or up_node.type is not NodeType.Convolution:
-                up_node = cnn_layer.LayerNode(layer_name, NodeType.Convolution,
-                                              input_nodes)
-                param = cnn_layer.NodeParam()
-                # For keras, output is not set for depthwise convolution
-                # skip setting num_output and set it
-                # when calculating in_out sizes
-                param.kernel_size = (1, 1)
-                param.pad_lrtb = 0, 0, 0, 0
-                param.keras_padding = "same"
-                param.stride = (1, 1)
-                param.group = 1
-                up_node.set_param(param)
-                if netweight is not None:
-                    up_node.set_weight_bias(None, None)
-                prev_node = up_node
+            node = cnn_layer.LayerNode(layer_name, NodeType.BatchNorm,
+                                       input_nodes)
             if netweight is not None:
                 weights = get_weights(netweight, layer_name, need_flip,
                                       ['gamma', 'beta',
                                        'moving_mean', 'moving_variance'])
-            node = cnn_layer.LayerNode(layer_name, NodeType.BatchNorm)
-            up_node.set_bn_node(node)
-            if netweight is not None:
                 node.set_mean_var(weights[2], weights[3])
-            node = cnn_layer.LayerNode(layer_name, NodeType.Scale)
-            up_node.set_scale_node(node)
-            if netweight is not None:
                 node.set_weight_bias(weights[0], weights[1])
-            top_map[layer_name] = up_node
+            node_map[layer_name] = node
             continue
         elif layer_type == 'ZeroPadding1D':
             # there is no padding layer if caffe so just extract padding info
@@ -311,11 +276,12 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     raise ValueError(
                         "Unsupported Keras ZeroPadding2D: %s" % pad)
                 padding = [int(pad)] * 4
-            top_map[layer_name] = up_node
-            if is_sequential:
-                pad_map = padding
-            else:
-                pad_map[layer_name] = padding
+            node = cnn_layer.LayerNode(layer_name, NodeType.Padding,
+                                       input_nodes)
+            param = cnn_layer.NodeParam()
+            param.pad_lrtb = padding
+            node.set_param(param)
+            node_map[layer_name] = node
             continue
         elif layer_type == 'ZeroPadding2D':
             # there is no padding layer if caffe so just extract padding info
@@ -381,11 +347,12 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     raise ValueError(
                         "Unsupported Keras ZeroPadding2D: %s" % pad)
                 padding = [int(pad), int(pad), int(pad), int(pad)]
-            top_map[layer_name] = up_node
-            if is_sequential:
-                pad_map = padding
-            else:
-                pad_map[layer_name] = padding
+            node = cnn_layer.LayerNode(layer_name, NodeType.Padding,
+                                       input_nodes)
+            param = cnn_layer.NodeParam()
+            param.pad_lrtb = padding
+            node.set_param(param)
+            node_map[layer_name] = node
             continue
         elif layer_type == 'Merge':
             mode = config['mode']
@@ -416,20 +383,17 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             node_type = NodeType.Custom
         else:
             if layer_type not in type_map:
-                logging.warning('Ignoring unknown layer, Name: %s, Type: %s',
-                                layer_name, layer_type)
-                top_map[layer_name] = up_node
-                continue
+                raise cnn_exception.ParseError(
+                        'Unknown layer, Name: %s, Type: %s',
+                        layer_name, layer_type)
             node_type = type_map[layer_type]
         node = cnn_layer.LayerNode(layer_name, node_type, input_nodes)
-        prev_node = node
-        parsed_nodes.append(node)
 
-        # add this node to top_map
-        if layer_name in top_map:
+        # add this node to node_map
+        if layer_name in node_map:
             raise cnn_exception.ParseError(
                 'Ill-formed layer. name:' + layer_name)
-        top_map[layer_name] = node
+        node_map[layer_name] = node
 
         if node_type == NodeType.Input:
             network.append_input_node(node)
@@ -459,7 +423,6 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             else:
                 param.kernel_size = (config['kernel_size'][1],
                                      config['kernel_size'][0])
-            param.pad_lrtb = get_padding(layer, pad_map)
             param.keras_padding = config['padding']
             param.dilation = config['dilation_rate']
             if is_1D:
@@ -479,13 +442,15 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 point_node = cnn_layer.LayerNode(layer_name + '_point',
                                                  node_type, node)
                 prev_node = point_node
-                top_map[layer_name] = point_node
+                node_map[layer_name] = point_node
                 param = cnn_layer.NodeParam()
                 param.num_output = config['filters']
                 point_node.set_param(param)
 
             if config['activation'] != 'linear':
-                set_inplace_node(prev_node, config, parsed_nodes)
+                inplace_node = set_inplace_node(node_map.values()[-1], config)
+                if inplace_node:
+                    node_map[inplace_node.name] = inplace_node
             if netweight is not None:
                 if layer_type[:-2] == 'SeparableConv':
                     weights = get_weights(netweight, layer_name, need_flip,
@@ -506,13 +471,11 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 param.pool = 1
             if layer_type in ('MaxPooling1D', 'AveragePooling1D'):
                 param.kernel_size = (config['pool_size'][0], 1)
-                param.pad_lrtb = get_padding(layer, pad_map)
                 param.keras_padding = config['padding']
                 param.stride = (config['strides'][0], 1)
             elif layer_type in ('MaxPooling2D', 'AveragePooling2D'):
                 param.kernel_size = (config['pool_size'][1],
                                      config['pool_size'][0])
-                param.pad_lrtb = get_padding(layer, pad_map)
                 param.keras_padding = config['padding']
                 param.stride = (config['strides'][1], config['strides'][0])
             else:
@@ -531,7 +494,9 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             param.num_output = config['units']
             node.set_param(param)
             if config['activation'] != 'linear':
-                set_inplace_node(node, config, parsed_nodes)
+                inplace_node = set_inplace_node(node, config)
+                if inplace_node:
+                    node_map[inplace_node.name] = inplace_node
             if netweight is not None:
                 weights = get_weights(netweight, layer_name, need_flip,
                                       ['kernel', 'bias'])
@@ -567,9 +532,91 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             param.custom_param = custom_param
             node.set_param(param)
 
-    for node in parsed_nodes:
+    _manupulate_node_graph(node_map, netweight)
+    for node in node_map.values():
         if len(node.output_nodes) == 0:
             network.append_output_node(node)
+
+
+def _manupulate_node_graph(node_map, netweight):
+    act_types = (
+            NodeType.LRN,
+            NodeType.ReLU,
+            NodeType.PReLU,
+            NodeType.TanH,
+            NodeType.ELU,
+            NodeType.Sigmoid,
+            NodeType.ReLU6,)
+
+    def _replace_node(old, new):
+        new.output_nodes = old.output_nodes
+        for on in old.output_nodes:
+            on.input_nodes = [new if (_n is old) else _n
+                              for _n in on.input_nodes]
+        node_map[old.name] = new
+
+    def _create_dummy_conv_node(node):
+        # dummy convolution
+        node = cnn_layer.LayerNode(node.name,
+                                   NodeType.Convolution,
+                                   node.input_nodes)
+        param = cnn_layer.NodeParam()
+        # For keras, output is not set for depthwise convolution
+        # skip setting num_output and set it
+        # when calculating in_out sizes
+        param.kernel_size = (1, 1)
+        param.pad_lrtb = 0, 0, 0, 0
+        param.keras_padding = "same"
+        param.stride = (1, 1)
+        param.group = 1
+        node.set_param(param)
+        if netweight is not None:
+            node.set_weight_bias(None, None)
+        return node
+
+    for node in node_map.values():
+        if node.type is NodeType.BatchNorm:
+            # Merge BatchNormalization to previous Convolution
+            assert(len(node.input_nodes) == 1)
+            if (node.input_nodes[0].type is NodeType.Convolution
+                    and len(node.input_nodes[0].output_nodes) == 1):
+                base_node = node.input_nodes[0]
+            else:
+                base_node = _create_dummy_conv_node(node)
+
+            bn_node = cnn_layer.LayerNode(node.name, NodeType.BatchNorm)
+            sc_node = cnn_layer.LayerNode(node.name, NodeType.Scale)
+            base_node.set_bn_node(bn_node)
+            base_node.set_scale_node(sc_node)
+            _replace_node(node, base_node)
+
+        elif node.type in act_types:
+            # Merge Activation to previous Convolution
+            assert(len(node.input_nodes) == 1)
+            _in = node.input_nodes[0]
+            if ((_in.type is NodeType.Convolution or
+                    _in.type is NodeType.InnerProduct)
+                    and len(_in.output_nodes) == 1):
+                base_node = node.input_nodes[0]
+            else:
+                base_node = _create_dummy_conv_node(node)
+
+            base_node.set_activation_node(node)
+            _replace_node(node, base_node)
+
+        elif node.type is NodeType.DropOut:
+            # Ignore Dropout
+            assert(len(node.input_nodes) == 1)
+            _replace_node(node, node.input_nodes[0])
+        elif node.type is NodeType.Padding:
+            assert(len(node.input_nodes) == 1)
+            for _out in node.output_nodes:
+                if _out.type is not NodeType.Convolution:
+                    raise cnn_exception.ParseError(
+                            "Padding Layer '{}' must be followed by Convolution"
+                            .format(node.name))
+                _out.param.pad_lrtb = node.param.pad_lrtb
+            _replace_node(node, node.input_nodes[0])
 
 
 def parse_keras_network(network, network_data):
