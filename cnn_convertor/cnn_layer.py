@@ -189,8 +189,8 @@ class LayerNode(object):
         self,
         name: str,
         node_type: NodeType,
-        input_node: Union['LayerNode', List['LayerNode']]=None,
-        output_node: Union['LayerNode', List['LayerNode']]=None,
+        input_node: Union['LayerNode', List['LayerNode']] = None,
+        output_node: Union['LayerNode', List['LayerNode']] = None,
     ) -> None:
         """Construct a LayerNode
 
@@ -219,14 +219,12 @@ class LayerNode(object):
             output_node = [output_node]
         self.input_nodes = input_node
         self.output_nodes = output_node
-        for node in input_node:
-            node.output_nodes.append(self)
-        for node in output_node:
-            node.input_nodes.append(self)
         self.bn_node = None
         self.sc_node = None
         self.act_node = None
         self.param = NodeParam()
+        self.weight = None
+        self.bias = None
 
     def __repr__(self):
         ret = "['%s', %s, _param:%s]"

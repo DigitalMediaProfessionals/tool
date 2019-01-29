@@ -441,7 +441,6 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             if layer_type[:-2] == 'SeparableConv':
                 point_node = cnn_layer.LayerNode(layer_name + '_point',
                                                  node_type, node)
-                prev_node = point_node
                 node_map[layer_name] = point_node
                 param = cnn_layer.NodeParam()
                 param.num_output = config['filters']
@@ -532,15 +531,27 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             param.custom_param = custom_param
             node.set_param(param)
 
-    _manupulate_node_graph(node_map, netweight)
+    _set_node_output(node_map)
+    _manipulate_node_graph(node_map)
     for node in node_map.values():
         if len(node.output_nodes) == 0:
             network.append_output_node(node)
 
 
-def _manupulate_node_graph(node_map, netweight):
+def _set_node_output(node_map):
+    nodes = list(node_map.values())
+    finished = []
+    while nodes:
+        node = nodes.pop()
+        for in_n in node.input_nodes:
+            in_n.output_nodes.append(node)
+            if in_n not in finished and in_n not in nodes:
+                nodes.append(in_n)
+        finished.append(node)
+
+
+def _manipulate_node_graph(node_map):
     act_types = (
-            NodeType.LRN,
             NodeType.ReLU,
             NodeType.PReLU,
             NodeType.TanH,
@@ -548,17 +559,34 @@ def _manupulate_node_graph(node_map, netweight):
             NodeType.Sigmoid,
             NodeType.ReLU6,)
 
-    def _replace_node(old, new):
-        new.output_nodes = old.output_nodes
-        for on in old.output_nodes:
-            on.input_nodes = [new if (_n is old) else _n
-                              for _n in on.input_nodes]
-        node_map[old.name] = new
+    def _replace_node(old, new=None):
+        """
+        If new is None, just remove `old`
+        """
+        def _aux(t, old, new, old_list):
+            """
+            @param t Target list
+            """
+            index = t.index(old)
+            if new is None:
+                _l = t[:]
+                t.clear()
+                t.extend(_l[:index] + old_list + _l[index + 1:])
+            else:
+                t[index] = new
+
+        if new is not None:
+            new.input_nodes = old.input_nodes[:]
+            new.output_nodes = old.output_nodes[:]
+
+        for _out in old.output_nodes:
+            _aux(_out.input_nodes, old, new, old.input_nodes)
+        for _in in old.input_nodes:
+            _aux(_in.output_nodes, old, new, old.output_nodes)
 
     def _create_dummy_conv_node(node):
         # dummy convolution
-        node = cnn_layer.LayerNode(node.name,
-                                   NodeType.Convolution,
+        node = cnn_layer.LayerNode(node.name, NodeType.Convolution,
                                    node.input_nodes)
         param = cnn_layer.NodeParam()
         # For keras, output is not set for depthwise convolution
@@ -570,53 +598,56 @@ def _manupulate_node_graph(node_map, netweight):
         param.stride = (1, 1)
         param.group = 1
         node.set_param(param)
-        if netweight is not None:
-            node.set_weight_bias(None, None)
         return node
 
     for node in node_map.values():
         if node.type is NodeType.BatchNorm:
             # Merge BatchNormalization to previous Convolution
             assert(len(node.input_nodes) == 1)
-            if (node.input_nodes[0].type is NodeType.Convolution
-                    and len(node.input_nodes[0].output_nodes) == 1):
-                base_node = node.input_nodes[0]
-            else:
+            create_dummy = (not
+                            (node.input_nodes[0].type is NodeType.Convolution
+                             and len(node.input_nodes[0].output_nodes) == 1))
+            if create_dummy:
                 base_node = _create_dummy_conv_node(node)
+            else:
+                base_node = node.input_nodes[0]
 
             bn_node = cnn_layer.LayerNode(node.name, NodeType.BatchNorm)
+            bn_node.set_mean_var(node.mean, node.var)
             sc_node = cnn_layer.LayerNode(node.name, NodeType.Scale)
+            sc_node.set_weight_bias(node.weight, node.bias)
             base_node.set_bn_node(bn_node)
             base_node.set_scale_node(sc_node)
-            _replace_node(node, base_node)
+            _replace_node(node, base_node if create_dummy else None)
 
         elif node.type in act_types:
             # Merge Activation to previous Convolution
             assert(len(node.input_nodes) == 1)
             _in = node.input_nodes[0]
-            if ((_in.type is NodeType.Convolution or
-                    _in.type is NodeType.InnerProduct)
-                    and len(_in.output_nodes) == 1):
-                base_node = node.input_nodes[0]
-            else:
+            create_dummy = not (_in.type in [NodeType.Convolution,
+                                             NodeType.InnerProduct]
+                                and len(_in.output_nodes) == 1)
+            if create_dummy:
                 base_node = _create_dummy_conv_node(node)
+            else:
+                base_node = node.input_nodes[0]
 
             base_node.set_activation_node(node)
-            _replace_node(node, base_node)
+            _replace_node(node, base_node if create_dummy else None)
 
         elif node.type is NodeType.DropOut:
             # Ignore Dropout
             assert(len(node.input_nodes) == 1)
-            _replace_node(node, node.input_nodes[0])
+            _replace_node(node, None)
         elif node.type is NodeType.Padding:
             assert(len(node.input_nodes) == 1)
             for _out in node.output_nodes:
                 if _out.type is not NodeType.Convolution:
                     raise cnn_exception.ParseError(
-                            "Padding Layer '{}' must be followed by Convolution"
-                            .format(node.name))
+                        "Padding Layer '{}' must be followed by Convolution"
+                        .format(node.name))
                 _out.param.pad_lrtb = node.param.pad_lrtb
-            _replace_node(node, node.input_nodes[0])
+            _replace_node(node)
 
 
 def parse_keras_network(network, network_data):
