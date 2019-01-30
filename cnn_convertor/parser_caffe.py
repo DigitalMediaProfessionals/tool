@@ -108,43 +108,28 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             logging.exception('Encountered unsupported layer format %s.',
                               layer.type)
             raise cnn_exception.ParseError('Unsupported type:' + layer.type)
-
         node_type = type_map[layer.type]
+
+        # search for exsisting input and output nodes
+        input_nodes = []
+        for label in layer.bottom:
+            if label in top_map:
+                input_nodes.append(top_map[label])
+
         if node_type in (NodeType.ReLU, NodeType.TanH, NodeType.ELU,
-                         NodeType.Sigmoid, NodeType.BatchNorm, NodeType.Scale,
-                         NodeType.PReLU):
-            node = cnn_layer.LayerNode(layer.name, node_type)
-            up_node = top_map[layer.bottom[0]]
-            if node_type == NodeType.BatchNorm:
-                up_node.set_bn_node(node)
-            elif node_type == NodeType.Scale:
-                up_node.set_scale_node(node)
-            else:
-                if node_type == NodeType.PReLU:
-                    pass
+                         NodeType.Sigmoid, NodeType.BatchNorm,
+                         NodeType.Scale, NodeType.PReLU, NodeType.DropOut):
+            if layer.bottom[0] == layer.top[0]:
+                node = cnn_layer.LayerNode(layer.name, node_type, input_nodes)
                 if node_type == NodeType.ReLU:
                     param = cnn_layer.NodeParam()
                     param.relu_param = layer.relu_param.negative_slope
                     node.set_param(param)
-                up_node.set_activation_node(node)
-            # If this is not in-place layer, add the up_node to the top_map
-            # Using the output label of this layer too
-            if layer.top[0] != layer.bottom[0]:
-                top_map[layer.top[0]] = up_node
-            continue
-        elif node_type in (NodeType.DropOut, NodeType.Data):
-            # Ignore data and drop out layer
-            continue
+                top_map[layer.top[0]] = node
+                continue
 
-        input_nodes = []
-
-        # search for exsisting input and output nodes
-        for label in layer.bottom:
-            if label in top_map:
-                input_nodes.append(top_map[label])
         node = cnn_layer.LayerNode(layer.name, node_type, input_nodes)
         parsed_nodes.append(node)
-
         # add this node to top_map and bottom_map
         for label in layer.top:
             if label in top_map:
@@ -200,10 +185,128 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             dims = layer.reshape_param.shape.dim
             param.reshape_param = (dims[3], dims[2], dims[1])
             node.set_param(param)
+        elif node_type == NodeType.ReLU:
+            param = cnn_layer.NodeParam()
+            param.relu_param = layer.relu_param.negative_slope
+            node.set_param(param)
 
+    _set_node_output(top_map)
+    _manipulate_node_graph(top_map)
     for node in parsed_nodes:
         if len(node.output_nodes) == 0:
             network.append_output_node(node)
+
+
+def _set_node_output(top_map):
+    nodes = list(top_map.values())
+    finished = []
+    while nodes:
+        node = nodes.pop()
+        for in_n in node.input_nodes:
+            in_n.output_nodes.append(node)
+            if in_n not in finished and in_n not in nodes:
+                nodes.append(in_n)
+        finished.append(node)
+
+
+def _manipulate_node_graph(top_map):
+    act_types = (
+            NodeType.ReLU,
+            NodeType.PReLU,
+            NodeType.TanH,
+            NodeType.ELU,
+            NodeType.Sigmoid,
+            NodeType.ReLU6,)
+
+    def _replace_node(old, new=None):
+        """
+        If new is None, just remove `old`
+        """
+        def _aux(t, old, new, old_list):
+            """
+            @param t Target list
+            """
+            index = t.index(old)
+            if new is None:
+                _l = t[:]
+                t.clear()
+                t.extend(_l[:index] + old_list + _l[index + 1:])
+            else:
+                t[index] = new
+
+        if new is not None:
+            new.input_nodes = old.input_nodes[:]
+            new.output_nodes = old.output_nodes[:]
+
+        for _out in old.output_nodes:
+            _aux(_out.input_nodes, old, new, old.input_nodes)
+        for _in in old.input_nodes:
+            _aux(_in.output_nodes, old, new, old.output_nodes)
+
+    def _create_dummy_conv_node(node):
+        # dummy convolution
+        node = cnn_layer.LayerNode(node.name, NodeType.Convolution,
+                                   node.input_nodes)
+        param = cnn_layer.NodeParam()
+        # For keras, output is not set for depthwise convolution
+        # skip setting num_output and set it
+        # when calculating in_out sizes
+        param.kernel_size = (1, 1)
+        param.pad_lrtb = 0, 0, 0, 0
+        param.keras_padding = "same"
+        param.stride = (1, 1)
+        param.group = 1
+        node.set_param(param)
+        return node
+
+    for node in top_map.values():
+        if node.type is NodeType.BatchNorm:
+            # Merge BatchNormalization to previous Convolution
+            assert(len(node.input_nodes) == 1)
+            create_dummy = (not
+                            (node.input_nodes[0].type is NodeType.Convolution
+                             and len(node.input_nodes[0].output_nodes) == 1))
+            if create_dummy:
+                base_node = _create_dummy_conv_node(node)
+            else:
+                base_node = node.input_nodes[0]
+
+            bn_node = cnn_layer.LayerNode(node.name, NodeType.BatchNorm)
+            bn_node.set_mean_var(node.mean, node.var)
+            sc_node = cnn_layer.LayerNode(node.name, NodeType.Scale)
+            sc_node.set_weight_bias(node.weight, node.bias)
+            base_node.set_bn_node(bn_node)
+            base_node.set_scale_node(sc_node)
+            _replace_node(node, base_node if create_dummy else None)
+
+        elif node.type in act_types:
+            # Merge Activation to previous Convolution
+            assert(len(node.input_nodes) == 1)
+            _in = node.input_nodes[0]
+            create_dummy = not (_in.type in [NodeType.Convolution,
+                                             NodeType.InnerProduct]
+                                and len(_in.output_nodes) == 1)
+            if create_dummy:
+                base_node = _create_dummy_conv_node(node)
+            else:
+                base_node = node.input_nodes[0]
+
+            base_node.set_activation_node(node)
+            _replace_node(node, base_node if create_dummy else None)
+
+        elif node.type in (NodeType.DropOut, NodeType.Data):
+            # Ignore Dropout or Data
+            assert(len(node.input_nodes) == 1)
+            _replace_node(node, None)
+        elif node.type is NodeType.Padding:
+            assert(len(node.input_nodes) == 1)
+            for _out in node.output_nodes:
+                if _out.type is not NodeType.Convolution:
+                    raise cnn_exception.ParseError(
+                        "Padding Layer '{}' must be followed by Convolution"
+                        .format(node.name))
+                _out.param.pad_lrtb = node.param.pad_lrtb
+            _replace_node(node)
 
 
 def parse_caffe_def(
