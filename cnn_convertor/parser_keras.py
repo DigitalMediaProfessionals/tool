@@ -42,7 +42,7 @@ def set_inplace_node(node, config):
     in_node = cnn_layer.LayerNode(node.name + '_' + activation,
                                   node_type, input_node)
     if input_node is None:
-        node.set_activation_node(in_node)
+        node.act_node = in_node
         return None
     else:
         return in_node
@@ -157,7 +157,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     dim = (shape[3], shape[2], shape[1])
                 else:
                     dim = (shape[2], shape[1], shape[3])
-            node.set_input_dim(dim)
+            node.input_dim = dim
             node_map[""] = node
 
         if is_sequential:
@@ -211,14 +211,14 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             if 'negative_slope' in config:
                 param = cnn_layer.NodeParam()
                 param.relu_param = config['negative_slope']
-                node.set_param(param)
+                node.param = param
             node_map[layer_name] = node
             continue
         elif layer_type == 'LeakyReLU':
             node = cnn_layer.LayerNode(layer_name, NodeType.ReLU, input_nodes)
             param = cnn_layer.NodeParam()
             param.relu_param = config['alpha']
-            node.set_param(param)
+            node.param = param
             node_map[layer_name] = node
             continue
         elif layer_type == 'PReLU':
@@ -280,7 +280,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                                        input_nodes)
             param = cnn_layer.NodeParam()
             param.pad_lrtb = padding
-            node.set_param(param)
+            node.param = param
             node_map[layer_name] = node
             continue
         elif layer_type == 'ZeroPadding2D':
@@ -351,7 +351,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                                        input_nodes)
             param = cnn_layer.NodeParam()
             param.pad_lrtb = padding
-            node.set_param(param)
+            node.param = param
             node_map[layer_name] = node
             continue
         elif layer_type == 'Merge':
@@ -409,7 +409,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     dim = (shape[3], shape[2], shape[1])
                 else:
                     dim = (shape[2], shape[1], shape[3])
-            node.set_input_dim(dim)
+            node.input_dim = dim
         elif node_type == NodeType.Convolution:
             is_1D = (layer_type[-2] == '1')
             param = cnn_layer.NodeParam()
@@ -436,7 +436,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                     logging.error('Depthwise/Separable Convolution with'
                                   '\'depth_multiplier\' is not supported.')
                     raise cnn_exception.ParseError('Unsupported param')
-            node.set_param(param)
+            node.param = param
 
             if layer_type[:-2] == 'SeparableConv':
                 point_node = cnn_layer.LayerNode(layer_name + '_point',
@@ -444,7 +444,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 node_map[layer_name] = point_node
                 param = cnn_layer.NodeParam()
                 param.num_output = config['filters']
-                point_node.set_param(param)
+                point_node.param = param
 
             if config['activation'] != 'linear':
                 inplace_node = set_inplace_node(node_map.values()[-1], config)
@@ -479,7 +479,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 param.stride = (config['strides'][1], config['strides'][0])
             else:
                 param.is_global = True
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.UpSampling:
             is_1D = (layer_type[-2] == '1')
             param = cnn_layer.NodeParam()
@@ -487,11 +487,11 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 param.kernel_size = (config['size'][0], 1)
             else:
                 param.kernel_size = (config['size'][1], config['size'][0])
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.InnerProduct:
             param = cnn_layer.NodeParam()
             param.num_output = config['units']
-            node.set_param(param)
+            node.param = param
             if config['activation'] != 'linear':
                 inplace_node = set_inplace_node(node, config)
                 if inplace_node:
@@ -503,7 +503,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
         elif node_type == NodeType.Reshape:
             param = cnn_layer.NodeParam()
             param.reshape_param = tuple(config['target_shape'])
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.Concat:
             param = cnn_layer.NodeParam()
             if 'axis' in config:
@@ -514,14 +514,14 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 param.axis -= 1
             if is_channel_first and param.axis >= 0:
                 param.axis = 2 - param.axis
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.SoftMax:
             param = cnn_layer.NodeParam()
             if 'axis' in config:
                 param.axis = config['axis']
             else:
                 param.axis = -1
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.Custom:
             param = cnn_layer.NodeParam()
             custom_config = network.custom_layer[layer_type]
@@ -529,7 +529,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 OrderedDict({x: config[x] for x in custom_config[0]}),
                 custom_config[1], layer_type)
             param.custom_param = custom_param
-            node.set_param(param)
+            node.param = param
 
     _set_node_output(node_map)
     _manipulate_node_graph(node_map)
@@ -597,7 +597,7 @@ def _manipulate_node_graph(node_map):
         param.keras_padding = "same"
         param.stride = (1, 1)
         param.group = 1
-        node.set_param(param)
+        node.param = param
         return node
 
     for node in node_map.values():
@@ -616,8 +616,8 @@ def _manipulate_node_graph(node_map):
             bn_node.set_mean_var(node.mean, node.var)
             sc_node = cnn_layer.LayerNode(node.name, NodeType.Scale)
             sc_node.set_weight_bias(node.weight, node.bias)
-            base_node.set_bn_node(bn_node)
-            base_node.set_scale_node(sc_node)
+            base_node.bn_node = bn_node
+            base_node.sc_node = sc_node
             _replace_node(node, base_node if create_dummy else None)
 
         elif node.type in act_types:
@@ -632,7 +632,7 @@ def _manipulate_node_graph(node_map):
             else:
                 base_node = node.input_nodes[0]
 
-            base_node.set_activation_node(node)
+            base_node.act_node = node
             _replace_node(node, base_node if create_dummy else None)
 
         elif node.type is NodeType.DropOut:

@@ -96,7 +96,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             dim = (caffe_net.input_shape[0].dim[3],
                    caffe_net.input_shape[0].dim[2],
                    caffe_net.input_shape[0].dim[1])
-        node.set_input_dim(dim)
+        node.input_dim = dim
         network.debug_node = caffe_net
         top_map[caffe_net.input[0]] = node
     # Handle each layer node
@@ -124,7 +124,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
                 if node_type == NodeType.ReLU:
                     param = cnn_layer.NodeParam()
                     param.relu_param = layer.relu_param.negative_slope
-                    node.set_param(param)
+                    node.param = param
                 top_map[layer.top[0]] = node
                 continue
 
@@ -142,7 +142,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             dim = (layer.input_param.shape[0].dim[3],
                    layer.input_param.shape[0].dim[2],
                    layer.input_param.shape[0].dim[1])
-            node.set_input_dim(dim)
+            node.input_dim = dim
             network.debug_node = caffe_net
         elif node_type == NodeType.Convolution:
             param = cnn_layer.NodeParam()
@@ -151,7 +151,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             param.pad_lrtb = get_pad(layer.convolution_param.pad)
             param.stride = get_tuple(layer.convolution_param.stride)
             param.group = int(layer.convolution_param.group)
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.Pooling:
             param = cnn_layer.NodeParam()
             param.pool = int(layer.pooling_param.pool)
@@ -159,11 +159,11 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             param.pad_lrtb = get_pad(layer.pooling_param.pad)
             param.stride = get_tuple(layer.pooling_param.stride)
             param.is_global = layer.pooling_param.global_pooling
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.UpSampling:
             param = cnn_layer.NodeParam()
             param.kernel_size = 2, 2
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.Power:
             if layer.power_param.power != 1 or layer.power_param.shift != 0:
                 raise ValueError(
@@ -172,23 +172,23 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
                     (layer.power_param.power, layer.power_param.shift))
             param = cnn_layer.NodeParam()
             param.scale = float(layer.power_param.scale)
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.InnerProduct:
             param = cnn_layer.NodeParam()
             param.num_output = int(layer.inner_product_param.num_output)
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.LRN:
             param = cnn_layer.NodeParam()
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.Reshape:
             param = cnn_layer.NodeParam()
             dims = layer.reshape_param.shape.dim
             param.reshape_param = (dims[3], dims[2], dims[1])
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.ReLU:
             param = cnn_layer.NodeParam()
             param.relu_param = layer.relu_param.negative_slope
-            node.set_param(param)
+            node.param = param
 
     _set_node_output(top_map)
     _manipulate_node_graph(top_map)
@@ -256,7 +256,7 @@ def _manipulate_node_graph(top_map):
         param.keras_padding = "same"
         param.stride = (1, 1)
         param.group = 1
-        node.set_param(param)
+        node.param = param
         return node
 
     for node in top_map.values():
@@ -275,8 +275,8 @@ def _manipulate_node_graph(top_map):
             bn_node.set_mean_var(node.mean, node.var)
             sc_node = cnn_layer.LayerNode(node.name, NodeType.Scale)
             sc_node.set_weight_bias(node.weight, node.bias)
-            base_node.set_bn_node(bn_node)
-            base_node.set_scale_node(sc_node)
+            base_node.bn_node = bn_node
+            base_node.sc_node = sc_node
             _replace_node(node, base_node if create_dummy else None)
 
         elif node.type in act_types:
@@ -291,7 +291,7 @@ def _manipulate_node_graph(top_map):
             else:
                 base_node = node.input_nodes[0]
 
-            base_node.set_activation_node(node)
+            base_node.act_node = node
             _replace_node(node, base_node if create_dummy else None)
 
         elif node.type in (NodeType.DropOut, NodeType.Data):

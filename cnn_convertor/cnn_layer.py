@@ -219,10 +219,10 @@ class LayerNode(object):
             output_node = [output_node]
         self.input_nodes = input_node
         self.output_nodes = output_node
-        self.bn_node = None
-        self.sc_node = None
-        self.act_node = None
-        self.param = NodeParam()
+        self._bn_node = None
+        self._sc_node = None
+        self._act_node = None
+        self._param = NodeParam()
         self.weight = None
         self.bias = None
 
@@ -233,35 +233,65 @@ class LayerNode(object):
             self.type,
             str(self.param))
 
-    def set_bn_node(self, node: 'LayerNode'):
+    @property
+    def bn_node(self):
+        return self._bn_node
+
+    @bn_node.setter
+    def bn_node(self, node: 'LayerNode'):
         """ Set the batched normalization node for convolution node."""
-        self.bn_node = node
+        self._bn_node = node
 
-    def set_scale_node(self, node: 'LayerNode'):
+    @property
+    def sc_node(self):
+        return self._sc_node
+
+    @sc_node.setter
+    def sc_node(self, node: 'LayerNode'):
         """ Set the scale node for convolution node."""
-        self.sc_node = node
+        self._sc_node = node
 
-    def set_activation_node(self, node: 'LayerNode'):
+    @property
+    def act_node(self):
+        return self._act_node
+
+    @act_node.setter
+    def act_node(self, node: 'LayerNode'):
         """ Set the activation node for convolution Node."""
-        self.act_node = node
+        self._act_node = node
 
-    def set_input_dim(self, input_dim: Tuple[int]):
-        self.input_dim = input_dim
+    @property
+    def input_dim(self):
+        return self._input_dim
 
-    def set_output_dim(self, output_dim: Tuple[int]):
-        self.output_dim = output_dim
+    @input_dim.setter
+    def input_dim(self, input_dim: Tuple[int]):
+        self._input_dim = input_dim
+
+    @property
+    def output_dim(self):
+        return self._output_dim
+
+    @output_dim.setter
+    def output_dim(self, output_dim: Tuple[int]):
+        self._output_dim = output_dim
         self.output_size = 2
         if self.type is NodeType.Custom:
             self.output_size = 4
         for n in output_dim:
             self.output_size *= n
 
-    def set_param(self, param: NodeParam):
+    @property
+    def param(self):
+        return self._param
+
+    @param.setter
+    def param(self, param: NodeParam):
         if param.kernel_size == (0, 0):
             param.kernel_size = (1, 1)
         if param.stride == (0, 0):
             param.stride = (1, 1)
-        self.param = param
+        self._param = param
 
     def set_weight_bias(self, weight, bias):
         """ Set weight and bias blobs data for convolution or scale node."""
@@ -390,15 +420,15 @@ class Network(object):
         node.name = node.name + '_' + str(split_w) + '_' + str(split_h)
 
         remain_node.input_dim = remain_dim
-        remain_node.set_output_dim(node.output_dim)
-        node.set_output_dim(remain_dim)
+        remain_node.output_dim = node.output_dim
+        node.output_dim = remain_dim
 
         param = NodeParam()
         param.pool = node.param.pool
         param.kernel_size = (remain_w, remain_h)
         param.stride = (remain_w, remain_h)
         param.split_pool_divisor = remaining_divisor
-        remain_node.set_param(param)
+        remain_node.param = param
         node.param.kernel_size = (split_w, split_h)
         node.param.stride = (split_w, split_h)
 
@@ -423,7 +453,7 @@ class Network(object):
         size = 1
         for n in dim:
             size *= n
-        flat_node.set_output_dim((size,))
+        flat_node.output_dim = (size,)
         self.traverse_list.insert(insert_index, flat_node)
         return flat_node
 
@@ -525,7 +555,7 @@ class Network(object):
             dim = self.dim_override
             for node in self.input_nodes:
                 new_dim = (dim[0], dim[1], node.input_dim[2])
-                node.set_input_dim(new_dim)
+                node.input_dim = new_dim
 
         tr_list = self.traverse_list[:]
         for node in tr_list:
@@ -537,7 +567,7 @@ class Network(object):
                            "is not supported.")
                     logging.exception(msg)
                     raise cnn_exception.ConvertError(msg)
-                node.set_output_dim(node.input_dim)
+                node.output_dim = node.input_dim
                 continue
             # For Keras, DepthwiseConvolution node don't have output_size set.
             # Set it here
@@ -546,25 +576,25 @@ class Network(object):
                 node.param.num_output = dim[-1] * node.param.group
                 node.param.group = dim[-1]
             if node.type == NodeType.Convolution:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 if len(dim) == 3:
                     dim = (get_output_xy(dim, node.param, False) +
                            (node.param.num_output,))
                 else:
                     raise cnn_exception.ConvertError('Invalid dimension')
-                node.set_output_dim(dim)
+                node.output_dim = dim
             elif node.type == NodeType.InnerProduct:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 dim = (node.param.num_output,)
-                node.set_output_dim(dim)
+                node.output_dim = dim
             elif node.type == NodeType.Pooling:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 if node.param.is_global:
                     node.param.kernel_size = (dim[0], dim[1])
                     dim = (1, 1, dim[2])
                 else:
                     dim = get_output_xy(dim, node.param, True) + (dim[2],)
-                node.set_output_dim(dim)
+                node.output_dim = dim
                 if node.param.pool == 0:    # max pooling
                     kernel_size_limit = 3
                 else:   # avg pooling
@@ -574,13 +604,13 @@ class Network(object):
                         node.param.kernel_size[1] > kernel_size_limit):
                     self.split_pool_node(node)
             elif node.type == NodeType.UpSampling:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 dim = (dim[0] * node.param.kernel_size[0],
                        dim[1] * node.param.kernel_size[1], dim[2])
-                node.set_output_dim(dim)
+                node.output_dim = dim
             elif node.type == NodeType.Power:
-                node.set_input_dim(dim)
-                node.set_output_dim(dim)
+                node.input_dim = dim
+                node.output_dim = dim
             elif node.type == NodeType.Concat:
                 axis = node.param.axis
                 c = 0
@@ -589,30 +619,30 @@ class Network(object):
                 temp_dim = list(dim)
                 temp_dim[axis] = c
                 dim = tuple(temp_dim)
-                node.set_input_dim(dim)
-                node.set_output_dim(dim)
+                node.input_dim = dim
+                node.output_dim = dim
                 if axis < 0:
                     node.param.axis = len(dim) + axis
             elif node.type == NodeType.Flatten:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 size = 1
                 for n in dim:
                     size *= n
-                node.set_output_dim((size,))
+                node.output_dim = (size,)
             elif node.type == NodeType.Reshape:
                 if len(dim) == 3 and dim[0] > 1 and dim[1] > 1:
                     flat_node = self.insert_flatten_node(node, dim)
                     dim = flat_node.output_dim
-                node.set_input_dim(dim)
-                node.set_output_dim(node.param.reshape_param)
+                node.input_dim = dim
+                node.output_dim = node.param.reshape_param
             elif node.type == NodeType.Custom:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 dim = node.param.custom_param[1](node.param.custom_param[0],
                                                  dim)
-                node.set_output_dim(dim)
+                node.output_dim = dim
             else:
-                node.set_input_dim(dim)
-                node.set_output_dim(dim)
+                node.input_dim = dim
+                node.output_dim = dim
 
 
 # Test script
