@@ -82,7 +82,7 @@ def get_weights(netweight, layer_name, need_flip, weight_entry):
     return weights
 
 
-def parse_keras_network2(network, net_def, netweight, need_flip=False):
+def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
     type_map = {
         'Conv1D': NodeType.Convolution,
         'Conv2D': NodeType.Convolution,
@@ -112,13 +112,16 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
         'ZeroPadding1D': NodeType.Padding,
         'ZeroPadding2D': NodeType.Padding,
     }
+    netarg_dict = {}
+    global_input_nodes = []
+
     netdef = json.loads(net_def)
     is_sequential = (netdef['class_name'] == 'Sequential')
     if type(netdef['config']) is list:
         layers = netdef['config']
     else:
         layers = netdef['config']['layers']
-    network.debug_node = netweight
+    netarg_dict["debug_node"] = netweight
 
     # get data_format parameter
     for layer in layers:
@@ -141,7 +144,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
         # if the first node is not input node, create a dummy input node
         if i == 0 and layer_type != 'InputLayer':
             node = cnn_layer.LayerNode('Input', NodeType.Input, None)
-            network.append_input_node(node)
+            global_input_nodes.append(node)
             shape = config['batch_input_shape']
             # handle FC only model
             if len(shape) == 2:
@@ -362,8 +365,8 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                 node_type = NodeType.Eltwise
         elif layer_type == 'Layer' and 'batch_input_shape' in config:
             node_type = NodeType.Input
-        elif layer_type in network.custom_layer:
-            custom_config = network.custom_layer[layer_type]
+        elif layer_type in custom_layer:
+            custom_config = custom_layer[layer_type]
             # set parameter type if it is the first time
             if type(custom_config[0]) is list:
                 c_type_map = {int: 'int', bool: 'bool', float: 'float'}
@@ -379,7 +382,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
                         c_type = c_type_map[type_0]
                     param_list[param_name] = c_type
                 custom_config = (param_list, custom_config[1])
-                network.custom_layer[layer_type] = custom_config
+                custom_layer[layer_type] = custom_config
             node_type = NodeType.Custom
         else:
             if layer_type not in type_map:
@@ -524,7 +527,7 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             node.param = param
         elif node_type == NodeType.Custom:
             param = cnn_layer.NodeParam()
-            custom_config = network.custom_layer[layer_type]
+            custom_config = custom_layer[layer_type]
             custom_param = (
                 OrderedDict({x: config[x] for x in custom_config[0]}),
                 custom_config[1], layer_type)
@@ -532,10 +535,11 @@ def parse_keras_network2(network, net_def, netweight, need_flip=False):
             node.param = param
 
     _set_node_output(node_map)
-    _manipulate_node_graph(node_map)
+    global_output_nodes = []
     for node in node_map.values():
         if len(node.output_nodes) == 0:
-            network.append_output_node(node)
+            global_output_nodes.append(node)
+    return global_input_nodes, global_output_nodes, netarg_dict
 
 
 def _set_node_output(node_map):
@@ -550,109 +554,10 @@ def _set_node_output(node_map):
         finished.append(node)
 
 
-def _manipulate_node_graph(node_map):
-    act_types = (
-            NodeType.ReLU,
-            NodeType.PReLU,
-            NodeType.TanH,
-            NodeType.ELU,
-            NodeType.Sigmoid,
-            NodeType.ReLU6,)
-
-    def _replace_node(old, new=None):
-        """
-        If new is None, just remove `old`
-        """
-        def _aux(t, old, new, old_list):
-            """
-            @param t Target list
-            """
-            index = t.index(old)
-            if new is None:
-                _l = t[:]
-                t.clear()
-                t.extend(_l[:index] + old_list + _l[index + 1:])
-            else:
-                t[index] = new
-
-        if new is not None:
-            new.input_nodes = old.input_nodes[:]
-            new.output_nodes = old.output_nodes[:]
-
-        for _out in old.output_nodes:
-            _aux(_out.input_nodes, old, new, old.input_nodes)
-        for _in in old.input_nodes:
-            _aux(_in.output_nodes, old, new, old.output_nodes)
-
-    def _create_dummy_conv_node(node):
-        # dummy convolution
-        node = cnn_layer.LayerNode(node.name, NodeType.Convolution,
-                                   node.input_nodes)
-        param = cnn_layer.NodeParam()
-        # For keras, output is not set for depthwise convolution
-        # skip setting num_output and set it
-        # when calculating in_out sizes
-        param.kernel_size = (1, 1)
-        param.pad_lrtb = 0, 0, 0, 0
-        param.keras_padding = "same"
-        param.stride = (1, 1)
-        param.group = 1
-        node.param = param
-        return node
-
-    for node in node_map.values():
-        if node.type is NodeType.BatchNorm:
-            # Merge BatchNormalization to previous Convolution
-            assert(len(node.input_nodes) == 1)
-            create_dummy = (not
-                            (node.input_nodes[0].type is NodeType.Convolution
-                             and len(node.input_nodes[0].output_nodes) == 1))
-            if create_dummy:
-                base_node = _create_dummy_conv_node(node)
-            else:
-                base_node = node.input_nodes[0]
-
-            bn_node = cnn_layer.LayerNode(node.name, NodeType.BatchNorm)
-            bn_node.set_mean_var(node.mean, node.var)
-            sc_node = cnn_layer.LayerNode(node.name, NodeType.Scale)
-            sc_node.set_weight_bias(node.weight, node.bias)
-            base_node.bn_node = bn_node
-            base_node.sc_node = sc_node
-            _replace_node(node, base_node if create_dummy else None)
-
-        elif node.type in act_types:
-            # Merge Activation to previous Convolution
-            assert(len(node.input_nodes) == 1)
-            _in = node.input_nodes[0]
-            create_dummy = not (_in.type in [NodeType.Convolution,
-                                             NodeType.InnerProduct]
-                                and len(_in.output_nodes) == 1)
-            if create_dummy:
-                base_node = _create_dummy_conv_node(node)
-            else:
-                base_node = node.input_nodes[0]
-
-            base_node.act_node = node
-            _replace_node(node, base_node if create_dummy else None)
-
-        elif node.type is NodeType.DropOut:
-            # Ignore Dropout
-            assert(len(node.input_nodes) == 1)
-            _replace_node(node, None)
-        elif node.type is NodeType.Padding:
-            assert(len(node.input_nodes) == 1)
-            for _out in node.output_nodes:
-                if _out.type is not NodeType.Convolution:
-                    raise cnn_exception.ParseError(
-                        "Padding Layer '{}' must be followed by Convolution"
-                        .format(node.name))
-                _out.param.pad_lrtb = node.param.pad_lrtb
-            _replace_node(node)
-
-
-def parse_keras_network(network, network_data):
+def parse_keras_network(network_data, custom_layer):
     logging.info('Parsing Keras network.')
 
+    netarg_dict = {}
     try:
         keras_net = h5py.File(network_data, 'r')
     except Exception as e:
@@ -670,11 +575,13 @@ def parse_keras_network(network, network_data):
         need_flip = True
     elif backend == 'tensorflow':
         need_flip = False
-        network.tensorflow_backend = True
+        netarg_dict["tensorflow_backend"] = True
     else:
         logging.error('Keras backend not supported.')
         raise cnn_exception.ParseError('Unsupported Keras backend')
 
     netdef = keras_net.attrs['model_config']
     netweight = keras_net['model_weights']
-    parse_keras_network2(network, netdef, netweight, need_flip)
+    input_nodes, output_nodes, netarg_dict2 =\
+        parse_keras_network2(netdef, netweight, custom_layer, need_flip)
+    return input_nodes, output_nodes, {**netarg_dict2, **netarg_dict}

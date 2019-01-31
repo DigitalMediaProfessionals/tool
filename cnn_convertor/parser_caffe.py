@@ -50,7 +50,7 @@ def get_pad(param):
         return param, param, param, param
 
 
-def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
+def parse_caffe_def2(netdef: str):
     type_map = {
         'Convolution': NodeType.Convolution,
         'InnerProduct': NodeType.InnerProduct,
@@ -84,10 +84,12 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
         raise
 
     top_map = {}
+    global_input_nodes = []
+    network_argdict = {}
     # Handle fixed size input
     if len(caffe_net.input) == 1:
         node = cnn_layer.LayerNode(caffe_net.input[0], NodeType.Input)
-        network.append_input_node(node)
+        global_input_nodes.append(node)
         if len(caffe_net.input_dim) == 4:
             dim = (caffe_net.input_dim[3],
                    caffe_net.input_dim[2],
@@ -97,7 +99,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
                    caffe_net.input_shape[0].dim[2],
                    caffe_net.input_shape[0].dim[1])
         node.input_dim = dim
-        network.debug_node = caffe_net
+        network_argdict["debug_node"] = caffe_net
         top_map[caffe_net.input[0]] = node
     # Handle each layer node
     parsed_nodes = []
@@ -138,12 +140,12 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             top_map[label] = node
 
         if node_type == NodeType.Input:
-            network.append_input_node(node)
+            global_input_nodes.append(node)
             dim = (layer.input_param.shape[0].dim[3],
                    layer.input_param.shape[0].dim[2],
                    layer.input_param.shape[0].dim[1])
             node.input_dim = dim
-            network.debug_node = caffe_net
+            network_argdict["debug_node"] = caffe_net
         elif node_type == NodeType.Convolution:
             param = cnn_layer.NodeParam()
             param.num_output = int(layer.convolution_param.num_output)
@@ -191,10 +193,12 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             node.param = param
 
     _set_node_output(top_map)
-    _manipulate_node_graph(top_map)
+    global_output_nodes = []
     for node in parsed_nodes:
         if len(node.output_nodes) == 0:
-            network.append_output_node(node)
+            global_output_nodes.append(node)
+
+    return global_input_nodes, global_output_nodes, network_argdict
 
 
 def _set_node_output(top_map):
@@ -209,113 +213,12 @@ def _set_node_output(top_map):
         finished.append(node)
 
 
-def _manipulate_node_graph(top_map):
-    act_types = (
-            NodeType.ReLU,
-            NodeType.PReLU,
-            NodeType.TanH,
-            NodeType.ELU,
-            NodeType.Sigmoid,
-            NodeType.ReLU6,)
-
-    def _replace_node(old, new=None):
-        """
-        If new is None, just remove `old`
-        """
-        def _aux(t, old, new, old_list):
-            """
-            @param t Target list
-            """
-            index = t.index(old)
-            if new is None:
-                _l = t[:]
-                t.clear()
-                t.extend(_l[:index] + old_list + _l[index + 1:])
-            else:
-                t[index] = new
-
-        if new is not None:
-            new.input_nodes = old.input_nodes[:]
-            new.output_nodes = old.output_nodes[:]
-
-        for _out in old.output_nodes:
-            _aux(_out.input_nodes, old, new, old.input_nodes)
-        for _in in old.input_nodes:
-            _aux(_in.output_nodes, old, new, old.output_nodes)
-
-    def _create_dummy_conv_node(node):
-        # dummy convolution
-        node = cnn_layer.LayerNode(node.name, NodeType.Convolution,
-                                   node.input_nodes)
-        param = cnn_layer.NodeParam()
-        # For keras, output is not set for depthwise convolution
-        # skip setting num_output and set it
-        # when calculating in_out sizes
-        param.kernel_size = (1, 1)
-        param.pad_lrtb = 0, 0, 0, 0
-        param.keras_padding = "same"
-        param.stride = (1, 1)
-        param.group = 1
-        node.param = param
-        return node
-
-    for node in top_map.values():
-        if node.type is NodeType.BatchNorm:
-            # Merge BatchNormalization to previous Convolution
-            assert(len(node.input_nodes) == 1)
-            create_dummy = (not
-                            (node.input_nodes[0].type is NodeType.Convolution
-                             and len(node.input_nodes[0].output_nodes) == 1))
-            if create_dummy:
-                base_node = _create_dummy_conv_node(node)
-            else:
-                base_node = node.input_nodes[0]
-
-            bn_node = cnn_layer.LayerNode(node.name, NodeType.BatchNorm)
-            bn_node.set_mean_var(node.mean, node.var)
-            sc_node = cnn_layer.LayerNode(node.name, NodeType.Scale)
-            sc_node.set_weight_bias(node.weight, node.bias)
-            base_node.bn_node = bn_node
-            base_node.sc_node = sc_node
-            _replace_node(node, base_node if create_dummy else None)
-
-        elif node.type in act_types:
-            # Merge Activation to previous Convolution
-            assert(len(node.input_nodes) == 1)
-            _in = node.input_nodes[0]
-            create_dummy = not (_in.type in [NodeType.Convolution,
-                                             NodeType.InnerProduct]
-                                and len(_in.output_nodes) == 1)
-            if create_dummy:
-                base_node = _create_dummy_conv_node(node)
-            else:
-                base_node = node.input_nodes[0]
-
-            base_node.act_node = node
-            _replace_node(node, base_node if create_dummy else None)
-
-        elif node.type in (NodeType.DropOut, NodeType.Data):
-            # Ignore Dropout or Data
-            assert(len(node.input_nodes) == 1)
-            _replace_node(node, None)
-        elif node.type is NodeType.Padding:
-            assert(len(node.input_nodes) == 1)
-            for _out in node.output_nodes:
-                if _out.type is not NodeType.Convolution:
-                    raise cnn_exception.ParseError(
-                        "Padding Layer '{}' must be followed by Convolution"
-                        .format(node.name))
-                _out.param.pad_lrtb = node.param.pad_lrtb
-            _replace_node(node)
-
-
 def parse_caffe_def(
-    network: cnn_layer.Network,
     network_def: str
 ):
     logging.info('Parsing Caffe network definitions.')
     with open(network_def, 'r') as fin:
-        parse_caffe_def2(network, fin.read())
+        return parse_caffe_def2(fin.read())
 
 
 def search_caffe_layer(layers, name):

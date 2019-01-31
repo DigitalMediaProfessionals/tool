@@ -308,15 +308,22 @@ class Network(object):
     """Represents a CNN.
     """
 
-    def __init__(self, custom_layer, dim_override) -> None:
+    def __init__(self, input_nodes, output_nodes, *,
+                 custom_layer={}, dim_override=None,
+                 debug_node=None, tensorflow_backend=False) -> None:
         """Construct an empty CNN.
         """
-        self.input_nodes = []
-        self.output_nodes = []
-        self.debug_node = None
+        self.input_nodes = input_nodes
+        self.output_nodes = output_nodes
+        self.debug_node = debug_node
         self.custom_layer = custom_layer
         self.dim_override = dim_override
-        self.tensorflow_backend = False
+        self.tensorflow_backend = tensorflow_backend
+
+        self.build_traverse_list()
+        self._manipulate_node_graph()
+        self.build_traverse_list()
+        self.calc_inout_sizes()
 
     def build_traverse_list(self) -> None:
         pending = self.output_nodes[:]
@@ -335,6 +342,105 @@ class Network(object):
                     pending.append(in_n)
         tlist.reverse()
         self.traverse_list = tlist
+
+    def _manipulate_node_graph(self):
+        act_types = (
+                NodeType.ReLU,
+                NodeType.PReLU,
+                NodeType.TanH,
+                NodeType.ELU,
+                NodeType.Sigmoid,
+                NodeType.ReLU6,)
+
+        def _replace_node(old, new=None):
+            """
+            If new is None, just remove `old`
+            """
+            def _aux(t, old, new, old_list):
+                """
+                @param t Target list
+                """
+                index = t.index(old)
+                if new is None:
+                    _l = t[:]
+                    t.clear()
+                    t.extend(_l[:index] + old_list + _l[index + 1:])
+                else:
+                    t[index] = new
+
+            if new is not None:
+                new.input_nodes = old.input_nodes[:]
+                new.output_nodes = old.output_nodes[:]
+
+            for _out in old.output_nodes:
+                _aux(_out.input_nodes, old, new, old.input_nodes)
+            for _in in old.input_nodes:
+                _aux(_in.output_nodes, old, new, old.output_nodes)
+
+        def _create_dummy_conv_node(node):
+            # dummy convolution
+            node = cnn_layer.LayerNode(node.name, NodeType.Convolution,
+                                       node.input_nodes)
+            param = cnn_layer.NodeParam()
+            # For keras, output is not set for depthwise convolution
+            # skip setting num_output and set it
+            # when calculating in_out sizes
+            param.kernel_size = (1, 1)
+            param.pad_lrtb = 0, 0, 0, 0
+            param.keras_padding = "same"
+            param.stride = (1, 1)
+            param.group = 1
+            node.param = param
+            return node
+
+        for node in self.traverse_list:
+            if node.type is NodeType.BatchNorm:
+                # Merge BatchNormalization to previous Convolution
+                assert(len(node.input_nodes) == 1)
+                create_dummy = (not
+                                (node.input_nodes[0].type is NodeType.Convolution
+                                 and len(node.input_nodes[0].output_nodes) == 1))
+                if create_dummy:
+                    base_node = _create_dummy_conv_node(node)
+                else:
+                    base_node = node.input_nodes[0]
+
+                bn_node = cnn_layer.LayerNode(node.name, NodeType.BatchNorm)
+                bn_node.set_mean_var(node.mean, node.var)
+                sc_node = cnn_layer.LayerNode(node.name, NodeType.Scale)
+                sc_node.set_weight_bias(node.weight, node.bias)
+                base_node.bn_node = bn_node
+                base_node.sc_node = sc_node
+                _replace_node(node, base_node if create_dummy else None)
+
+            elif node.type in act_types:
+                # Merge Activation to previous Convolution
+                assert(len(node.input_nodes) == 1)
+                _in = node.input_nodes[0]
+                create_dummy = not (_in.type in [NodeType.Convolution,
+                                                 NodeType.InnerProduct]
+                                    and len(_in.output_nodes) == 1)
+                if create_dummy:
+                    base_node = _create_dummy_conv_node(node)
+                else:
+                    base_node = node.input_nodes[0]
+
+                base_node.act_node = node
+                _replace_node(node, base_node if create_dummy else None)
+
+            elif node.type in (NodeType.DropOut, NodeType.Data):
+                # Ignore Dropout
+                assert(len(node.input_nodes) == 1)
+                _replace_node(node, None)
+            elif node.type is NodeType.Padding:
+                assert(len(node.input_nodes) == 1)
+                for _out in node.output_nodes:
+                    if _out.type is not NodeType.Convolution:
+                        raise cnn_exception.ParseError(
+                            "Padding Layer '{}' must be followed by Convolution"
+                            .format(node.name))
+                    _out.param.pad_lrtb = node.param.pad_lrtb
+                _replace_node(node)
 
     def append_input_node(self, node):
         self.input_nodes.append(node)
