@@ -379,9 +379,8 @@ class Network(object):
 
         def _create_dummy_conv_node(node):
             # dummy convolution
-            node = cnn_layer.LayerNode(node.name, NodeType.Convolution,
-                                       node.input_nodes)
-            param = cnn_layer.NodeParam()
+            node = LayerNode(node.name, NodeType.Convolution, node.input_nodes)
+            param = NodeParam()
             # For keras, output is not set for depthwise convolution
             # skip setting num_output and set it
             # when calculating in_out sizes
@@ -405,9 +404,9 @@ class Network(object):
                 else:
                     base_node = node.input_nodes[0]
 
-                bn_node = cnn_layer.LayerNode(node.name, NodeType.BatchNorm)
+                bn_node = LayerNode(node.name, NodeType.BatchNorm)
                 bn_node.set_mean_var(node.mean, node.var)
-                sc_node = cnn_layer.LayerNode(node.name, NodeType.Scale)
+                sc_node = LayerNode(node.name, NodeType.Scale)
                 sc_node.set_weight_bias(node.weight, node.bias)
                 base_node.bn_node = bn_node
                 base_node.sc_node = sc_node

@@ -399,7 +399,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
         node_map[layer_name] = node
 
         if node_type == NodeType.Input:
-            network.append_input_node(node)
+            global_input_nodes.append(node)
             shape = config['batch_input_shape']
             # handle 1D input dimensions
             if len(shape) == 3:
