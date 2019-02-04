@@ -766,7 +766,8 @@ def gen_source_conv(of, name, n, layer, quantization):
         conv_pad = run.conv.param.pad_fpga if is_conv else 0
         conv_stride = (run.conv.param.stride[0] |
                        (run.conv.param.stride[1] << 8) if is_conv else 0x0101)
-        if run.conv.param.dilation & 0xfefe:
+        if is_conv and ((run.conv.param.dilation[0] & 0xfe) or
+                        (run.conv.param.dilation[1] & 0xfe)):
             conv_dilation = ((run.conv.param.dilation[0] & 0xff |
                              ((run.conv.param.dilation[1] & 0xff) << 8))
                              if is_conv else 0)
