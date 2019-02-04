@@ -766,9 +766,14 @@ def gen_source_conv(of, name, n, layer, quantization):
         conv_pad = run.conv.param.pad_fpga if is_conv else 0
         conv_stride = (run.conv.param.stride[0] |
                        (run.conv.param.stride[1] << 8) if is_conv else 0x0101)
-        conv_dilation = ((run.conv.param.dilation[0] & 0xff |
-                         ((run.conv.param.dilation[1] & 0xff) << 8))
-                         if is_conv else 0)
+        if is_conv and ((run.conv.param.dilation[0] & 0xfe) or
+                        (run.conv.param.dilation[1] & 0xfe)):
+            conv_dilation = ((run.conv.param.dilation[0] & 0xff |
+                             ((run.conv.param.dilation[1] & 0xff) << 8))
+                             if is_conv else 0)
+        else:
+            # For non dilation CONV, use 0 to enble HW's non-dilation conv mode
+            conv_dilation = 0
 
         pool_enable = (1 if run.pool else 0)
         pool_size = (run.pool.param.kernel_size[0] | (
@@ -1463,8 +1468,9 @@ class FPGANetwork(object):
             necessary_size = make_align_size(lr.layer.node_out.output_size)
             if not lr.allocated:
                 current_live_ranges = [_lr for _lr in live_ranges
-                                       if _lr.birth_index - 1
-                                       <= index <= _lr.death_index]
+                                       if not
+                                       (_lr.birth_index > lr.death_index or
+                                        _lr.death_index < lr.birth_index)]
                 current_live_ranges = sorted(
                                     current_live_ranges,
                                     key=(lambda x: x.layer.output_addr_offset))
