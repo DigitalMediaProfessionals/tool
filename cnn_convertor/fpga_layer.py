@@ -1468,8 +1468,9 @@ class FPGANetwork(object):
             necessary_size = make_align_size(lr.layer.node_out.output_size)
             if not lr.allocated:
                 current_live_ranges = [_lr for _lr in live_ranges
-                                       if _lr.birth_index - 1
-                                       <= index <= _lr.death_index]
+                                       if not
+                                       (_lr.birth_index > lr.death_index or
+                                        _lr.death_index < lr.birth_index)]
                 current_live_ranges = sorted(
                                     current_live_ranges,
                                     key=(lambda x: x.layer.output_addr_offset))
