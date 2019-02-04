@@ -21,8 +21,14 @@ from typing import List, Union, Tuple
 from enum import IntEnum, auto
 
 
-def get_conv_out_width(width, kx, pad_left, pad_right, stride):
-    return (pad_left + width + pad_right - kx) // stride + 1
+def get_conv_out_width(width, kx, pad_left, pad_right, stride, dilation):
+    return (pad_left + width + pad_right - ((kx - 1) * dilation + 1))\
+            / stride + 1
+
+
+def get_conv_out_width_floor(width, kx, pad_left, pad_right, stride, dilation):
+    return math.floor(get_conv_out_width(width, kx, pad_left, pad_right,
+                                         stride, dilation))
 
 
 class NodeType(IntEnum):
@@ -74,7 +80,7 @@ class NodeParam(object):
         self.custom_param = None
         self.scale = 1.0
         self.split_pool_divisor = None
-        self._dilation = [0, 0]
+        self._dilation = [1, 1]
 
     @property
     def dilation(self):
@@ -103,7 +109,6 @@ class NodeParam(object):
             self._pad[1] = int(value)
             self._pad[2] = int(value)
             self._pad[3] = int(value)
-        assert len(self._dilation) == 4
 
     @property
     def pad(self):
@@ -440,63 +445,76 @@ class Network(object):
                 oh = math.ceil(float(h) / param.stride[1])
 
                 # Increase padding if necessary
-                while get_conv_out_width(
+                while get_conv_out_width_floor(
                         w, param.kernel_size[0], param.pad_lrtb[0],
-                        param.pad_lrtb[1], param.stride[0]) < ow:
-                    param.pad_lrtb[0 if param.pad_lrtb[0] < param.pad_lrtb[1]
-                                   else 1] += 1
-                while get_conv_out_width(
+                        param.pad_lrtb[1], param.stride[0],
+                        param.dilation[0]) < ow:
+                    _i = 0 if param.pad_lrtb[0] < param.pad_lrtb[1] else 1
+                    param.pad_lrtb[_i] += 1
+                while get_conv_out_width_floor(
                         h, param.kernel_size[1], param.pad_lrtb[2],
-                        param.pad_lrtb[3], param.stride[1]) < oh:
-                    param.pad_lrtb[2 if param.pad_lrtb[2] < param.pad_lrtb[3]
-                                   else 3] += 1
+                        param.pad_lrtb[3], param.stride[1],
+                        param.dilation[1]) < oh:
+                    _i = 2 if param.pad_lrtb[2] < param.pad_lrtb[3] else 3
+                    param.pad_lrtb[_i] += 1
                 # Decrease padding if necessary
-                while get_conv_out_width(
+                while get_conv_out_width_floor(
                         w, param.kernel_size[0], param.pad_lrtb[0],
-                        param.pad_lrtb[1], param.stride[0]) > ow:
-                    param.pad_lrtb[0 if param.pad_lrtb[0] >= param.pad_lrtb[1]
-                                   else 1] -= 1
-                while get_conv_out_width(
+                        param.pad_lrtb[1], param.stride[0],
+                        param.dilation[0]) > ow:
+                    _i = 0 if param.pad_lrtb[0] >= param.pad_lrtb[1] else 1
+                    param.pad_lrtb[_i] -= 1
+                while get_conv_out_width_floor(
                         h, param.kernel_size[1], param.pad_lrtb[2],
-                        param.pad_lrtb[3], param.stride[1]) > oh:
-                    param.pad_lrtb[2 if param.pad_lrtb[2] >= param.pad_lrtb[3]
-                                   else 3] -= 1
-                assert get_conv_out_width(
-                        w, param.kernel_size[0], param.pad_lrtb[0],
-                        param.pad_lrtb[1], param.stride[0]) == ow
-                assert get_conv_out_width(
-                        h, param.kernel_size[1], param.pad_lrtb[2],
-                        param.pad_lrtb[3], param.stride[1]) == oh
-            elif param.keras_padding == "causal":
-                # TODO: dilation is ignored for now
-                param.pad_lrtb[0] += param.kernel_size[0] - 1
+                        param.pad_lrtb[3], param.stride[1],
+                        param.dilation[1]) > oh:
+                    _i = 2 if param.pad_lrtb[2] >= param.pad_lrtb[3] else 3
+                    param.pad_lrtb[_i] -= 1
 
-            ow = (float(param.pad_lrtb[0] + w + param.pad_lrtb[1] -
-                        param.kernel_size[0]) / param.stride[0]) + 1
-            oh = (float(param.pad_lrtb[2] + h + param.pad_lrtb[3] -
-                        param.kernel_size[1]) / param.stride[1]) + 1
+                assert get_conv_out_width_floor(
+                        w, param.kernel_size[0], param.pad_lrtb[0],
+                        param.pad_lrtb[1], param.stride[0],
+                        param.dilation[0]) == ow
+                assert get_conv_out_width_floor(
+                        h, param.kernel_size[1], param.pad_lrtb[2],
+                        param.pad_lrtb[3], param.stride[1],
+                        param.dilation[1]) == oh
+            elif param.keras_padding == "causal":
+                param.pad_lrtb[0] += (param.kernel_size[0] - 1)\
+                                        * param.dilation[0]
+
+            ow = get_conv_out_width(w, param.kernel_size[0], param.pad_lrtb[0],
+                                    param.pad_lrtb[1], param.stride[0],
+                                    param.dilation[0])
+            oh = get_conv_out_width(h, param.kernel_size[1], param.pad_lrtb[2],
+                                    param.pad_lrtb[3], param.stride[1],
+                                    param.dilation[1])
 
             if is_pool and param.keras_padding is None:
                 # Handle non-Keras (Caffe) padding separately
                 ow = math.ceil(ow)
                 oh = math.ceil(oh)
                 # Increase padding if necessary
-                while get_conv_out_width(
+                while get_conv_out_width_floor(
                         w, param.kernel_size[0], param.pad_lrtb[0],
-                        param.pad_lrtb[1], param.stride[0]) < ow:
-                    param.pad_lrtb[0 if param.pad_lrtb[0] < param.pad_lrtb[1]
-                                   else 1] += 1
-                while get_conv_out_width(
+                        param.pad_lrtb[1], param.stride[0],
+                        param.dilation[0]) < ow:
+                    _i = 0 if param.pad_lrtb[0] < param.pad_lrtb[1] else 1
+                    param.pad_lrtb[_i] += 1
+                while get_conv_out_width_floor(
                         h, param.kernel_size[1], param.pad_lrtb[2],
-                        param.pad_lrtb[3], param.stride[1]) < oh:
-                    param.pad_lrtb[2 if param.pad_lrtb[2] < param.pad_lrtb[3]
-                                   else 3] += 1
-                assert get_conv_out_width(
+                        param.pad_lrtb[3], param.stride[1],
+                        param.dilation[0]) < oh:
+                    _i = 2 if param.pad_lrtb[2] < param.pad_lrtb[3] else 3
+                    param.pad_lrtb[_i] += 1
+                assert get_conv_out_width_floor(
                         w, param.kernel_size[0], param.pad_lrtb[0],
-                        param.pad_lrtb[1], param.stride[0]) == ow
-                assert get_conv_out_width(
+                        param.pad_lrtb[1], param.stride[0],
+                        param.dilation[0]) == ow
+                assert get_conv_out_width_floor(
                         h, param.kernel_size[1], param.pad_lrtb[2],
-                        param.pad_lrtb[3], param.stride[1]) == oh
+                        param.pad_lrtb[3], param.stride[1],
+                        param.dilation[1]) == oh
             else:
                 ow = math.floor(ow)
                 oh = math.floor(oh)
