@@ -766,9 +766,13 @@ def gen_source_conv(of, name, n, layer, quantization):
         conv_pad = run.conv.param.pad_fpga if is_conv else 0
         conv_stride = (run.conv.param.stride[0] |
                        (run.conv.param.stride[1] << 8) if is_conv else 0x0101)
-        conv_dilation = ((run.conv.param.dilation[0] & 0xff |
-                         ((run.conv.param.dilation[1] & 0xff) << 8))
-                         if is_conv else 0)
+        if run.conv.param.dilation & 0xfefe:
+            conv_dilation = ((run.conv.param.dilation[0] & 0xff |
+                             ((run.conv.param.dilation[1] & 0xff) << 8))
+                             if is_conv else 0)
+        else:
+            # For non dilation CONV, use 0 to enble HW's non-dilation conv mode
+            conv_dilation = 0
 
         pool_enable = (1 if run.pool else 0)
         pool_size = (run.pool.param.kernel_size[0] | (
