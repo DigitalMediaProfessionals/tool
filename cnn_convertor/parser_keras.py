@@ -175,9 +175,9 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
                         input_nodes.append(node_map[label])
 
         if (layer_type == 'Dropout'):
-            top_map[layer_name] = cnn_layer.LayerNode(layer_name,
-                                                      NodeType.DropOut,
-                                                      input_nodes)
+            node_map[layer_name] = cnn_layer.LayerNode(layer_name,
+                                                       NodeType.DropOut,
+                                                       input_nodes)
             continue
         elif layer_type == 'Activation':
             activation = config['activation']
