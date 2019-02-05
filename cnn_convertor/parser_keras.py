@@ -164,7 +164,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
             node_map[""] = node
 
         if is_sequential:
-            input_nodes = node_map.values()[-1]
+            input_nodes = list(node_map.values())[-1]
         else:
             # search for exsisting input and output nodes
             input_nodes = []
@@ -450,7 +450,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
                 point_node.param = param
 
             if config['activation'] != 'linear':
-                inplace_node = set_inplace_node(node_map.values()[-1], config)
+                inplace_node = set_inplace_node(list(node_map.values())[-1], config)
                 if inplace_node:
                     node_map[inplace_node.name] = inplace_node
             if netweight is not None:

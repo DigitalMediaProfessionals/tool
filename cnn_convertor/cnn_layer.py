@@ -225,6 +225,8 @@ class LayerNode(object):
         self._param = NodeParam()
         self.weight = None
         self.bias = None
+        self.mean = None
+        self.var = None
 
     def __repr__(self):
         ret = "['%s', %s, _param:%s]"
