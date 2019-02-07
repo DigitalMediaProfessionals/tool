@@ -436,7 +436,8 @@ class Network(object):
             elif node.type is NodeType.Padding:
                 assert(len(node.input_nodes) == 1)
                 for _out in node.output_nodes:
-                    if _out.type is not NodeType.Convolution:
+                    if _out.type not in (NodeType.Convolution,
+                                         NodeType.Pooling):
                         raise cnn_exception.ParseError(
                             "Padding Layer '{}' must be followed by Convolution"
                             .format(node.name))
