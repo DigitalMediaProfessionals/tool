@@ -18,6 +18,7 @@ import os
 import math
 import logging
 import numpy as np
+import itertools
 from cnn_convertor import cnn_layer, cnn_exception, cnn_docgen
 from cnn_convertor.cnn_layer import NodeType, get_conv_out_width_floor
 from cnn_convertor import fpga_limitation
@@ -725,7 +726,6 @@ def gen_source_conv(of, name, n, layer, quantization):
             layer_names.append(run.pool.name)
     of.write('void C{0}::Layer_{1}() '.format(name, n))
     of.write('{\n')
-    of.write('  get_layer({0}).name = "{1}";\n'.format(n, ", ".join(layer_names)))
     of.write('  dmp_dv_cmdraw_conv_v0& conf = get_layer({0}).conv_conf;\n'.format(n))
     of.write('  conf.header.size = sizeof(conf);\n')
     of.write('  conf.header.device_type = DMP_DV_DEV_CONV;\n')
@@ -876,7 +876,6 @@ def gen_source_fc(of, name, n, layer, quantization):
     of.write('//	->: {0}\n'.format(node.name))
     of.write('void C{0}::Layer_{1}() '.format(name, n))
     of.write('{\n')
-    of.write('  get_layer({0}).name = "{1}";\n'.format(n, node.name))
     of.write('  dmp_dv_cmdraw_fc_v0& conf = get_layer({0}).fc_conf;\n'.format(n))
     of.write('  conf.header.size = sizeof(conf);\n')
     of.write('  conf.header.version = 0;\n')
@@ -893,6 +892,18 @@ def gen_source_fc(of, name, n, layer, quantization):
     of.write('  conf.actfunc = {0};  // Activation Function: 0 = None, 1 = ReLU, 2 = Tanh, 3 = Leaky ReLU, 4 = Sigmoid, 5 = PReLU (PReLU must be used with POST-OP=1)\n'.format(actfunc))
     of.write('  conf.actfunc_param = 0x{0:X};  // Leaky ReLU parameter (in FP16 format), 0 = non-leaky\n'.format(actparam))
     weight_offset += size
+
+
+def _is_input_hw_layout(layer):
+    for inl in layer.layer_in:
+        if inl.type is LayerType.Convolution:
+            return True
+        elif inl.type is LayerType.Concatenate:
+            if _is_input_hw_layout(inl):
+                return True
+            # TODO: raise exception if multipe layouts exists in input
+
+    return False
 
 
 def gen_source_layer(of, name, n, layer, quantization):
@@ -952,6 +963,7 @@ def gen_source_layer(of, name, n, layer, quantization):
         of.write('  };\n\n')
 
     of.write('  fpga_layer& layer = get_layer({0});\n'.format(n))
+    of.write('  layer.name = "{0}";\n'.format(layer.node_out.name))
     of.write('  layer.type = {0};\n'.format(type_map[layer.type]))
     of.write('  layer.input_offs = {0};\n'.format(
         layer.layer_in[0].output_addr_offset))
@@ -972,7 +984,7 @@ def gen_source_layer(of, name, n, layer, quantization):
     for d in layer.node_out.output_dim:
         osize *= d
     of.write('  layer.is_f32_output = {0};\n'.format('true' if layer.node_out.output_size / osize == 4 else 'false'))
-    of.write('  layer.is_input_hw_layout = {0};\n'.format('true' if layer.layer_in[0].type is LayerType.Convolution else 'false'))
+    of.write('  layer.is_input_hw_layout = {0};\n'.format('true' if _is_input_hw_layout(layer) else 'false'))
     if layer.type is LayerType.SoftMax:
         axis = layer.node_in.param.axis
         if axis < 0:
@@ -1361,7 +1373,7 @@ class FPGANetwork(object):
         """Set layer output addresses."""
         logging.info('Converted layer info')
         logging.info("{:22s} {:22s} {:12s} {:5s} {:18s} {:8s} {:s}".format(
-            'Input Node', 'Output Node', 'Node Type', 'Range',
+            'Input Node', 'Output Node', 'Node Type', 'Live Range',
             'Output Dimension', 'Addr', 'Size'))
 
         class LayerLiveRange(object):
@@ -1374,76 +1386,108 @@ class FPGANetwork(object):
         live_ranges = []
         weight_size = 0
         for index, layer in enumerate(self.layer):
+            # calc weight and increment the counter
             if layer.type is LayerType.Convolution:
                 self.num_conv_layers += 1
                 for run in layer.run:
                     weight_size += get_weight_size(run.conv, self.quantization)
             elif layer.type is LayerType.InnerProduct:
                 self.num_fc_layers += 1
-                weight_size += get_fc_weight_size(layer.node_in, self.quantization)
+                weight_size += get_fc_weight_size(layer.node_in,
+                                                  self.quantization)
+
+            # add to output_layer
             if layer.is_output:
                 self.num_output_layers += 1
                 self.output_layer.append(layer)
+
+            # create LayerLiveRange
             lr = LayerLiveRange(layer, index)
-            for node_in in layer.node_in.input_nodes:
-                for lr_in in live_ranges:
-                    if node_in is lr_in.layer.node_out:
-                        lr.layer.layer_in.append(lr_in.layer)
-                        if lr_in.death_index < index:
-                            lr_in.death_index = index
+            for node_in, lr_in in itertools.product(layer.node_in.input_nodes,
+                                                    live_ranges):
+                if node_in is lr_in.layer.node_out:
+                    lr.layer.layer_in.append(lr_in.layer)
+                    if lr_in.death_index < index:
+                        lr_in.death_index = index
             if lr.layer.is_output:
                 lr.death_index = len(self.layer) - 1
             live_ranges.append(lr)
 
-        # handle concat layer
-        for index, lr in enumerate(live_ranges):
+        # handle concat layer and update live_ranges
+        def _lr_is_partof_concat(lr, concat_lr):
+            if concat_lr.layer.type is not LayerType.Concatenate:
+                return False
+            while lr:
+                if lr is concat_lr:
+                    return True
+                lr = lr.output_concat_lr
+            return False
+
+        for index, lr in enumerate(reversed(live_ranges)):
+            index = len(live_ranges) - index
             if lr.layer.type is LayerType.Concatenate:
                 for prev_lr in live_ranges[:index]:
                     if prev_lr.layer.node_out in lr.layer.node_in.input_nodes:
                         prev_lr.output_concat_lr = lr
+
+        for index, lr in enumerate(reversed(live_ranges)):
+            index = len(live_ranges) - index
+            if lr.layer.type is LayerType.Concatenate:
+                for prev_lr in live_ranges[:index]:
+                    if _lr_is_partof_concat(prev_lr, lr):
                         max_di = max(prev_lr.death_index, lr.death_index)
                         prev_lr.death_index = max_di
                         lr.death_index = max_di
+                        min_di = min(prev_lr.birth_index, lr.birth_index)
+                        prev_lr.birth_index = min_di
+                        lr.birth_index = min_di
 
-        current_live_ranges = []
-        allocated_size = 0
+        def get_dst_concat_lr(lr):
+            """
+            search final concat node Life Range
+            If lr.output_concat_lr is None, lr is returned.
+            """
+            _lr = lr
+            while _lr.output_concat_lr:
+                _lr = _lr.output_concat_lr
+            return _lr
 
-        for index, lr in enumerate(live_ranges):
-            necessary_size = make_align_size(lr.layer.node_out.output_size)
+        allocated_size = 0  # size to be allocated
+        for index, lr in enumerate(reversed(live_ranges)):
+            index = len(live_ranges) - 1 - index
+
             if lr.output_concat_lr:
                 offset = 0
                 for node in lr.output_concat_lr.layer.node_in.input_nodes:
                     if node == lr.layer.node_out:
                         break
                     offset += node.output_size
-                if lr.output_concat_lr.allocated:
-                    lr.allocated = True
-                    lr.layer.output_addr_offset = (
-                        lr.output_concat_lr.layer.output_addr_offset + offset)
-                else:
-                    necessary_size = make_align_size(
-                        lr.output_concat_lr.layer.node_out.output_size)
+                lr.layer.output_addr_offset = lr.output_concat_lr.layer.output_addr_offset + offset
+                lr.allocated = True
 
-            # update current live ranges
-            for clr in current_live_ranges[:]:
-                if clr.death_index < index:
-                    current_live_ranges.remove(clr)
-
+            necessary_size = make_align_size(lr.layer.node_out.output_size)
             if not lr.allocated:
+                current_live_ranges = [_lr for _lr in live_ranges
+                                       if _lr.birth_index - 1
+                                       <= index <= _lr.death_index]
+                current_live_ranges = sorted(
+                                    current_live_ranges,
+                                    key=(lambda x: x.layer.output_addr_offset))
+
                 # find if can re-use empty spaces in current live ranges
-                layer_allocated = False
+                empty_found = False
                 current_offset = 0
-                for i, clr in enumerate(current_live_ranges):
-                    if (clr.layer.output_addr_offset - current_offset >=
-                            necessary_size):
-                        layer_allocated = True
+                for clr in current_live_ranges:
+                    if not clr.allocated:
+                        continue
+
+                    empty_found = (clr.layer.output_addr_offset
+                                   - current_offset >= necessary_size)
+                    if empty_found:
                         lr.layer.output_addr_offset = current_offset
-                        if lr.output_concat_lr:
-                            current_live_ranges.insert(i, lr.output_concat_lr)
-                        else:
-                            current_live_ranges.insert(i, lr)
                         break
                     else:
+                        # to next, update current_offset
                         increment_size = make_align_size(
                             clr.layer.node_out.output_size)
                         if clr.output_concat_lr:
@@ -1453,21 +1497,13 @@ class FPGANetwork(object):
                                           increment_size)
 
                 # if not, put it in the end of current buffer
-                if not layer_allocated:
-                    if lr.output_concat_lr:
-                        current_live_ranges.append(lr.output_concat_lr)
-                    else:
-                        current_live_ranges.append(lr)
+                if not empty_found:
                     lr.layer.output_addr_offset = current_offset
                     if current_offset + necessary_size > allocated_size:
                         allocated_size = current_offset + necessary_size
-
                 lr.allocated = True
-                if lr.output_concat_lr and not lr.output_concat_lr.allocated:
-                    lr.output_concat_lr.allocated = True
-                    lr.output_concat_lr.layer.output_addr_offset = lr.layer.output_addr_offset
-                    lr.layer.output_addr_offset += offset
 
+        for lr in live_ranges:
             logging.info("{:22s} {:22s} {:12s} {:02d} {:02d} {:18s} {:08X} {:08X}{:s}".format(
                 lr.layer.node_in.name, lr.layer.node_out.name,
                 str(lr.layer.type),

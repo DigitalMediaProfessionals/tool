@@ -252,7 +252,7 @@ class LayerNode(object):
     def set_output_dim(self, output_dim: Tuple[int]):
         self.output_dim = output_dim
         self.output_size = 2
-        if self.type is NodeType.Custom or self.type is NodeType.SoftMax:
+        if self.type is NodeType.Custom:
             self.output_size = 4
         for n in output_dim:
             self.output_size *= n
