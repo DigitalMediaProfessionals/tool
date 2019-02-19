@@ -1300,6 +1300,9 @@ class FPGANetwork(object):
                         run_depth = 0
                         while run_depth < 3 and node_out != tl[concat_index]:
                             run_depth += 1
+                            if not node_out.output_nodes:
+                                can_merge = False
+                                break
                             if node_out.type is NodeType.Convolution:
                                 node_out = node_out.output_nodes[0]
                                 if (node_out.type is not NodeType.Pooling or
@@ -1310,7 +1313,7 @@ class FPGANetwork(object):
                             else:
                                 run_depth = 100
                             node_out = node_out.output_nodes[0]
-                        if run_depth > 2 or run_depth == 0:
+                        if not can_merge or run_depth > 2 or run_depth == 0:
                             can_merge = False
                             break
                     # test if all channels of input nodes are dividable by 8
