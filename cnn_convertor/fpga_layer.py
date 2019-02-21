@@ -1056,7 +1056,7 @@ class FPGALayer(object):
                     self.run.append(run)
                     run = FPGARun()
             elif node.type in (NodeType.UpSampling, NodeType.Eltwise,
-                                NodeType.Power):
+                               NodeType.Power):
                 if run.conv:
                     self.run.append(run)
                     run = FPGARun()
@@ -1076,12 +1076,13 @@ class FPGALayer(object):
                     run = FPGARun()
                 if len(self.run) == 0:
                     need_copy = False
-                    if len(node.output_dim) == 3:
-                        # ignore the last input node
-                        for node_in in node.input_nodes[:-1]:
-                            if node_in.output_dim[2] % 8 != 0:
-                                need_copy = True
-                                break
+                    # ignore the last input node
+                    for node_in in node.input_nodes[:-1]:
+                        if (node_in.output_dim[-1] % 8 != 0) or
+                            (node_in.output_size !=
+                                make_align_size(node_in.output_size)):
+                            need_copy = True
+                            break
                     if need_copy:
                         self.type = LayerType.CopyConcatenate
                     else:
