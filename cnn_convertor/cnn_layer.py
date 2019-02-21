@@ -56,6 +56,7 @@ class NodeType(IntEnum):
     ELU = auto()
     Sigmoid = auto()
     ReLU6 = auto()
+    Padding = auto()
 
     def __repr__(self):
         return '<%s.%s>' % (self.__class__.__name__, self.name)
@@ -188,8 +189,8 @@ class LayerNode(object):
         self,
         name: str,
         node_type: NodeType,
-        input_node: Union['LayerNode', List['LayerNode']]=None,
-        output_node: Union['LayerNode', List['LayerNode']]=None,
+        input_node: Union['LayerNode', List['LayerNode']] = None,
+        output_node: Union['LayerNode', List['LayerNode']] = None,
     ) -> None:
         """Construct a LayerNode
 
@@ -218,14 +219,14 @@ class LayerNode(object):
             output_node = [output_node]
         self.input_nodes = input_node
         self.output_nodes = output_node
-        for node in input_node:
-            node.output_nodes.append(self)
-        for node in output_node:
-            node.input_nodes.append(self)
-        self.bn_node = None
-        self.sc_node = None
-        self.act_node = None
-        self.param = NodeParam()
+        self._bn_node = None
+        self._sc_node = None
+        self._act_node = None
+        self._param = NodeParam()
+        self.weight = None
+        self.bias = None
+        self.mean = None
+        self.var = None
 
     def __repr__(self):
         ret = "['%s', %s, _param:%s]"
@@ -234,35 +235,65 @@ class LayerNode(object):
             self.type,
             str(self.param))
 
-    def set_bn_node(self, node: 'LayerNode'):
+    @property
+    def bn_node(self):
+        return self._bn_node
+
+    @bn_node.setter
+    def bn_node(self, node: 'LayerNode'):
         """ Set the batched normalization node for convolution node."""
-        self.bn_node = node
+        self._bn_node = node
 
-    def set_scale_node(self, node: 'LayerNode'):
+    @property
+    def sc_node(self):
+        return self._sc_node
+
+    @sc_node.setter
+    def sc_node(self, node: 'LayerNode'):
         """ Set the scale node for convolution node."""
-        self.sc_node = node
+        self._sc_node = node
 
-    def set_activation_node(self, node: 'LayerNode'):
+    @property
+    def act_node(self):
+        return self._act_node
+
+    @act_node.setter
+    def act_node(self, node: 'LayerNode'):
         """ Set the activation node for convolution Node."""
-        self.act_node = node
+        self._act_node = node
 
-    def set_input_dim(self, input_dim: Tuple[int]):
-        self.input_dim = input_dim
+    @property
+    def input_dim(self):
+        return self._input_dim
 
-    def set_output_dim(self, output_dim: Tuple[int]):
-        self.output_dim = output_dim
+    @input_dim.setter
+    def input_dim(self, input_dim: Tuple[int]):
+        self._input_dim = input_dim
+
+    @property
+    def output_dim(self):
+        return self._output_dim
+
+    @output_dim.setter
+    def output_dim(self, output_dim: Tuple[int]):
+        self._output_dim = output_dim
         self.output_size = 2
         if self.type is NodeType.Custom:
             self.output_size = 4
         for n in output_dim:
             self.output_size *= n
 
-    def set_param(self, param: NodeParam):
+    @property
+    def param(self):
+        return self._param
+
+    @param.setter
+    def param(self, param: NodeParam):
         if param.kernel_size == (0, 0):
             param.kernel_size = (1, 1)
         if param.stride == (0, 0):
             param.stride = (1, 1)
-        self.param = param
+        self._param = param
 
     def set_weight_bias(self, weight, bias):
         """ Set weight and bias blobs data for convolution or scale node."""
@@ -279,15 +310,22 @@ class Network(object):
     """Represents a CNN.
     """
 
-    def __init__(self, custom_layer, dim_override) -> None:
+    def __init__(self, input_nodes, output_nodes, *,
+                 custom_layer={}, dim_override=None,
+                 debug_node=None, tensorflow_backend=False) -> None:
         """Construct an empty CNN.
         """
-        self.input_nodes = []
-        self.output_nodes = []
-        self.debug_node = None
+        self.input_nodes = input_nodes
+        self.output_nodes = output_nodes
+        self.debug_node = debug_node
         self.custom_layer = custom_layer
         self.dim_override = dim_override
-        self.tensorflow_backend = False
+        self.tensorflow_backend = tensorflow_backend
+
+        self.build_traverse_list()
+        self._manipulate_node_graph()
+        self.build_traverse_list()
+        self.calc_inout_sizes()
 
     def build_traverse_list(self) -> None:
         pending = self.output_nodes[:]
@@ -306,6 +344,121 @@ class Network(object):
                     pending.append(in_n)
         tlist.reverse()
         self.traverse_list = tlist
+
+    def _manipulate_node_graph(self):
+        act_types = (
+                NodeType.ReLU,
+                NodeType.PReLU,
+                NodeType.TanH,
+                NodeType.ELU,
+                NodeType.Sigmoid,
+                NodeType.ReLU6,)
+
+        def _replace_node(old, new=None):
+            """
+            If new is None, just remove `old`
+            """
+            def _aux(t, old, new, old_list):
+                """
+                @param t Target list
+                """
+                index = t.index(old)
+                if new is None:
+                    _l = t[:]
+                    t.clear()
+                    t.extend(_l[:index] + old_list + _l[index + 1:])
+                else:
+                    t[index] = new
+
+            if new is not None:
+                new.input_nodes = old.input_nodes[:]
+                new.output_nodes = old.output_nodes[:]
+
+            for _out in old.output_nodes:
+                _aux(_out.input_nodes, old, new, old.input_nodes)
+            for _in in old.input_nodes:
+                _aux(_in.output_nodes, old, new, old.output_nodes)
+
+        def _create_dummy_conv_node(node):
+            # dummy convolution
+            node = LayerNode(node.name, NodeType.Convolution, node.input_nodes)
+            param = NodeParam()
+            # For keras, output is not set for depthwise convolution
+            # skip setting num_output and set it
+            # when calculating in_out sizes
+            param.kernel_size = (1, 1)
+            param.pad_lrtb = 0, 0, 0, 0
+            param.keras_padding = "same"
+            param.stride = (1, 1)
+            param.group = 1
+            node.param = param
+            return node
+
+        for node in self.traverse_list:
+            if node.type is NodeType.BatchNorm:
+                # Merge BatchNormalization to previous Convolution
+                assert(len(node.input_nodes) == 1)
+                create_dummy = (not
+                                (node.input_nodes[0].type is NodeType.Convolution
+                                 and len(node.input_nodes[0].output_nodes) == 1))
+                if create_dummy:
+                    base_node = _create_dummy_conv_node(node)
+                else:
+                    base_node = node.input_nodes[0]
+
+                bn_node = LayerNode(node.name, NodeType.BatchNorm)
+                bn_node.set_mean_var(node.mean, node.var)
+                base_node.bn_node = bn_node
+                if node.weight is not None and node.bias is not None:
+                    sc_node = LayerNode(node.name, NodeType.Scale)
+                    sc_node.set_weight_bias(node.weight, node.bias)
+                    base_node.sc_node = sc_node
+                _replace_node(node, base_node if create_dummy else None)
+
+            elif node.type is NodeType.Scale:
+                # Merge Scale to previous Convolution
+                assert(len(node.input_nodes) == 1)
+                create_dummy = (not
+                                (node.input_nodes[0].type is NodeType.Convolution
+                                 and len(node.input_nodes[0].output_nodes) == 1))
+                if create_dummy:
+                    base_node = _create_dummy_conv_node(node)
+                else:
+                    base_node = node.input_nodes[0]
+                sc_node = LayerNode(node.name, NodeType.Scale)
+                sc_node.set_weight_bias(node.weight, node.bias)
+                base_node.sc_node = sc_node
+                _replace_node(node, base_node if create_dummy else None)
+
+            elif node.type in act_types:
+                # Merge Activation to previous Convolution
+                assert(len(node.input_nodes) == 1)
+                _in = node.input_nodes[0]
+                create_dummy = not (_in.type in [NodeType.Convolution,
+                                                 NodeType.InnerProduct]
+                                    and len(_in.output_nodes) == 1)
+                if create_dummy:
+                    base_node = _create_dummy_conv_node(node)
+                else:
+                    base_node = node.input_nodes[0]
+
+                base_node.act_node = node
+                _replace_node(node, base_node if create_dummy else None)
+
+            elif node.type in (NodeType.DropOut, NodeType.Data):
+                # Ignore Dropout
+                assert(len(node.input_nodes) == 1)
+                _replace_node(node, None)
+            elif node.type is NodeType.Padding:
+                assert(len(node.input_nodes) == 1)
+                for _out in node.output_nodes:
+                    if _out.type not in (NodeType.Convolution,
+                                         NodeType.Pooling):
+                        raise cnn_exception.ParseError(
+                            "Padding Layer '{}' must be followed by Convolution"
+                            .format(node.name))
+                    _out.param.pad_lrtb = node.param.pad_lrtb
+                _replace_node(node)
 
     def append_input_node(self, node):
         self.input_nodes.append(node)
@@ -391,15 +544,15 @@ class Network(object):
         node.name = node.name + '_' + str(split_w) + '_' + str(split_h)
 
         remain_node.input_dim = remain_dim
-        remain_node.set_output_dim(node.output_dim)
-        node.set_output_dim(remain_dim)
+        remain_node.output_dim = node.output_dim
+        node.output_dim = remain_dim
 
         param = NodeParam()
         param.pool = node.param.pool
         param.kernel_size = (remain_w, remain_h)
         param.stride = (remain_w, remain_h)
         param.split_pool_divisor = remaining_divisor
-        remain_node.set_param(param)
+        remain_node.param = param
         node.param.kernel_size = (split_w, split_h)
         node.param.stride = (split_w, split_h)
 
@@ -424,7 +577,7 @@ class Network(object):
         size = 1
         for n in dim:
             size *= n
-        flat_node.set_output_dim((size,))
+        flat_node.output_dim = (size,)
         self.traverse_list.insert(insert_index, flat_node)
         return flat_node
 
@@ -526,7 +679,7 @@ class Network(object):
             dim = self.dim_override
             for node in self.input_nodes:
                 new_dim = (dim[0], dim[1], node.input_dim[2])
-                node.set_input_dim(new_dim)
+                node.input_dim = new_dim
 
         tr_list = self.traverse_list[:]
         for node in tr_list:
@@ -538,7 +691,7 @@ class Network(object):
                            "is not supported.")
                     logging.exception(msg)
                     raise cnn_exception.ConvertError(msg)
-                node.set_output_dim(node.input_dim)
+                node.output_dim = node.input_dim
                 continue
             # For Keras, DepthwiseConvolution node don't have output_size set.
             # Set it here
@@ -547,25 +700,25 @@ class Network(object):
                 node.param.num_output = dim[-1] * node.param.group
                 node.param.group = dim[-1]
             if node.type == NodeType.Convolution:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 if len(dim) == 3:
                     dim = (get_output_xy(dim, node.param, False) +
                            (node.param.num_output,))
                 else:
                     raise cnn_exception.ConvertError('Invalid dimension')
-                node.set_output_dim(dim)
+                node.output_dim = dim
             elif node.type == NodeType.InnerProduct:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 dim = (node.param.num_output,)
-                node.set_output_dim(dim)
+                node.output_dim = dim
             elif node.type == NodeType.Pooling:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 if node.param.is_global:
                     node.param.kernel_size = (dim[0], dim[1])
                     dim = (1, 1, dim[2])
                 else:
                     dim = get_output_xy(dim, node.param, True) + (dim[2],)
-                node.set_output_dim(dim)
+                node.output_dim = dim
                 if node.param.pool == 0:    # max pooling
                     kernel_size_limit = 3
                 else:   # avg pooling
@@ -575,13 +728,13 @@ class Network(object):
                         node.param.kernel_size[1] > kernel_size_limit):
                     self.split_pool_node(node)
             elif node.type == NodeType.UpSampling:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 dim = (dim[0] * node.param.kernel_size[0],
                        dim[1] * node.param.kernel_size[1], dim[2])
-                node.set_output_dim(dim)
+                node.output_dim = dim
             elif node.type == NodeType.Power:
-                node.set_input_dim(dim)
-                node.set_output_dim(dim)
+                node.input_dim = dim
+                node.output_dim = dim
             elif node.type == NodeType.Concat:
                 axis = node.param.axis
                 c = 0
@@ -590,30 +743,30 @@ class Network(object):
                 temp_dim = list(dim)
                 temp_dim[axis] = c
                 dim = tuple(temp_dim)
-                node.set_input_dim(dim)
-                node.set_output_dim(dim)
+                node.input_dim = dim
+                node.output_dim = dim
                 if axis < 0:
                     node.param.axis = len(dim) + axis
             elif node.type == NodeType.Flatten:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 size = 1
                 for n in dim:
                     size *= n
-                node.set_output_dim((size,))
+                node.output_dim = (size,)
             elif node.type == NodeType.Reshape:
                 if len(dim) == 3 and dim[0] > 1 and dim[1] > 1:
                     flat_node = self.insert_flatten_node(node, dim)
                     dim = flat_node.output_dim
-                node.set_input_dim(dim)
-                node.set_output_dim(node.param.reshape_param)
+                node.input_dim = dim
+                node.output_dim = node.param.reshape_param
             elif node.type == NodeType.Custom:
-                node.set_input_dim(dim)
+                node.input_dim = dim
                 dim = node.param.custom_param[1](node.param.custom_param[0],
                                                  dim)
-                node.set_output_dim(dim)
+                node.output_dim = dim
             else:
-                node.set_input_dim(dim)
-                node.set_output_dim(dim)
+                node.input_dim = dim
+                node.output_dim = dim
 
 
 # Test script

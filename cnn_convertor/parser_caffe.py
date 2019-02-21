@@ -50,7 +50,7 @@ def get_pad(param):
         return param, param, param, param
 
 
-def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
+def parse_caffe_def2(netdef: str):
     type_map = {
         'Convolution': NodeType.Convolution,
         'InnerProduct': NodeType.InnerProduct,
@@ -84,10 +84,12 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
         raise
 
     top_map = {}
+    global_input_nodes = []
+    network_argdict = {}
     # Handle fixed size input
     if len(caffe_net.input) == 1:
         node = cnn_layer.LayerNode(caffe_net.input[0], NodeType.Input)
-        network.append_input_node(node)
+        global_input_nodes.append(node)
         if len(caffe_net.input_dim) == 4:
             dim = (caffe_net.input_dim[3],
                    caffe_net.input_dim[2],
@@ -96,8 +98,8 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             dim = (caffe_net.input_shape[0].dim[3],
                    caffe_net.input_shape[0].dim[2],
                    caffe_net.input_shape[0].dim[1])
-        node.set_input_dim(dim)
-        network.debug_node = caffe_net
+        node.input_dim = dim
+        network_argdict["debug_node"] = caffe_net
         top_map[caffe_net.input[0]] = node
     # Handle each layer node
     parsed_nodes = []
@@ -108,43 +110,28 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             logging.exception('Encountered unsupported layer format %s.',
                               layer.type)
             raise cnn_exception.ParseError('Unsupported type:' + layer.type)
-
         node_type = type_map[layer.type]
-        if node_type in (NodeType.ReLU, NodeType.TanH, NodeType.ELU,
-                         NodeType.Sigmoid, NodeType.BatchNorm, NodeType.Scale,
-                         NodeType.PReLU):
-            node = cnn_layer.LayerNode(layer.name, node_type)
-            up_node = top_map[layer.bottom[0]]
-            if node_type == NodeType.BatchNorm:
-                up_node.set_bn_node(node)
-            elif node_type == NodeType.Scale:
-                up_node.set_scale_node(node)
-            else:
-                if node_type == NodeType.PReLU:
-                    pass
-                if node_type == NodeType.ReLU:
-                    param = cnn_layer.NodeParam()
-                    param.relu_param = layer.relu_param.negative_slope
-                    node.set_param(param)
-                up_node.set_activation_node(node)
-            # If this is not in-place layer, add the up_node to the top_map
-            # Using the output label of this layer too
-            if layer.top[0] != layer.bottom[0]:
-                top_map[layer.top[0]] = up_node
-            continue
-        elif node_type in (NodeType.DropOut, NodeType.Data):
-            # Ignore data and drop out layer
-            continue
-
-        input_nodes = []
 
         # search for exsisting input and output nodes
+        input_nodes = []
         for label in layer.bottom:
             if label in top_map:
                 input_nodes.append(top_map[label])
+
+        if node_type in (NodeType.ReLU, NodeType.TanH, NodeType.ELU,
+                         NodeType.Sigmoid, NodeType.BatchNorm,
+                         NodeType.Scale, NodeType.PReLU, NodeType.DropOut):
+            if layer.bottom[0] == layer.top[0]:
+                node = cnn_layer.LayerNode(layer.name, node_type, input_nodes)
+                if node_type == NodeType.ReLU:
+                    param = cnn_layer.NodeParam()
+                    param.relu_param = layer.relu_param.negative_slope
+                    node.param = param
+                top_map[layer.top[0]] = node
+                continue
+
         node = cnn_layer.LayerNode(layer.name, node_type, input_nodes)
         parsed_nodes.append(node)
-
         # add this node to top_map and bottom_map
         for label in layer.top:
             if label in top_map:
@@ -153,12 +140,12 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             top_map[label] = node
 
         if node_type == NodeType.Input:
-            network.append_input_node(node)
+            global_input_nodes.append(node)
             dim = (layer.input_param.shape[0].dim[3],
                    layer.input_param.shape[0].dim[2],
                    layer.input_param.shape[0].dim[1])
-            node.set_input_dim(dim)
-            network.debug_node = caffe_net
+            node.input_dim = dim
+            network_argdict["debug_node"] = caffe_net
         elif node_type == NodeType.Convolution:
             param = cnn_layer.NodeParam()
             param.num_output = int(layer.convolution_param.num_output)
@@ -166,7 +153,7 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             param.pad_lrtb = get_pad(layer.convolution_param.pad)
             param.stride = get_tuple(layer.convolution_param.stride)
             param.group = int(layer.convolution_param.group)
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.Pooling:
             param = cnn_layer.NodeParam()
             param.pool = int(layer.pooling_param.pool)
@@ -174,11 +161,11 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
             param.pad_lrtb = get_pad(layer.pooling_param.pad)
             param.stride = get_tuple(layer.pooling_param.stride)
             param.is_global = layer.pooling_param.global_pooling
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.UpSampling:
             param = cnn_layer.NodeParam()
             param.kernel_size = 2, 2
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.Power:
             if layer.power_param.power != 1 or layer.power_param.shift != 0:
                 raise ValueError(
@@ -187,32 +174,51 @@ def parse_caffe_def2(network: cnn_layer.Network, netdef: str):
                     (layer.power_param.power, layer.power_param.shift))
             param = cnn_layer.NodeParam()
             param.scale = float(layer.power_param.scale)
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.InnerProduct:
             param = cnn_layer.NodeParam()
             param.num_output = int(layer.inner_product_param.num_output)
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.LRN:
             param = cnn_layer.NodeParam()
-            node.set_param(param)
+            node.param = param
         elif node_type == NodeType.Reshape:
             param = cnn_layer.NodeParam()
             dims = layer.reshape_param.shape.dim
             param.reshape_param = (dims[3], dims[2], dims[1])
-            node.set_param(param)
+            node.param = param
+        elif node_type == NodeType.ReLU:
+            param = cnn_layer.NodeParam()
+            param.relu_param = layer.relu_param.negative_slope
+            node.param = param
 
+    _set_node_output(top_map)
+    global_output_nodes = []
     for node in parsed_nodes:
         if len(node.output_nodes) == 0:
-            network.append_output_node(node)
+            global_output_nodes.append(node)
+
+    return global_input_nodes, global_output_nodes, network_argdict
+
+
+def _set_node_output(top_map):
+    nodes = list(top_map.values())
+    finished = []
+    while nodes:
+        node = nodes.pop()
+        for in_n in node.input_nodes:
+            in_n.output_nodes.append(node)
+            if in_n not in finished and in_n not in nodes:
+                nodes.append(in_n)
+        finished.append(node)
 
 
 def parse_caffe_def(
-    network: cnn_layer.Network,
     network_def: str
 ):
     logging.info('Parsing Caffe network definitions.')
     with open(network_def, 'r') as fin:
-        parse_caffe_def2(network, fin.read())
+        return parse_caffe_def2(fin.read())
 
 
 def search_caffe_layer(layers, name):

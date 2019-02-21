@@ -25,16 +25,17 @@ def parse_network(
     custom_layer: list,
     dim_override: tuple
 ) -> cnn_layer.Network:
-    network = cnn_layer.Network(custom_layer, dim_override)
-
     logging.info('Start parsing. Network type:' + network_type)
+    argdict = {"custom_layer": custom_layer, "dim_override": dim_override}
     if network_type == 'CAFFE':
-        parser_caffe.parse_caffe_def(network, network_def)
-        network.build_traverse_list()
-        network.calc_inout_sizes()
+        input_nodes, output_nodes, netarg_dict =\
+                parser_caffe.parse_caffe_def(network_def)
+        network = cnn_layer.Network(input_nodes, output_nodes,
+                                    **{**netarg_dict, **argdict})
         parser_caffe.parse_caffe_data(network, network_data)
     elif network_type == 'KERAS':
-        parser_keras.parse_keras_network(network, network_data)
-        network.build_traverse_list()
-        network.calc_inout_sizes()
+        input_nodes, output_nodes, netarg_dict =\
+            parser_keras.parse_keras_network(network_data, custom_layer)
+        network = cnn_layer.Network(input_nodes, output_nodes,
+                                    **{**netarg_dict, **argdict})
     return network
