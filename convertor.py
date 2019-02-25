@@ -66,7 +66,8 @@ config.read_dict({'INPUT': {'custom_layer': '',
                              'quantization': 1,
                              'python_module': ''},
                   'OPTIONAL': {'verbose': 0,
-                               'graphviz_path': ''}
+                               'python_module': '',
+                               'output_layer': ''},
                   })
 abspath = os.path.abspath(args.INPUT_INI)
 absdir = os.path.dirname(abspath)
@@ -89,6 +90,8 @@ try:
     output_gengraph = config.getboolean('OUTPUT', 'generate_dot')
     output_quantization = config.getboolean('OUTPUT', 'quantization')
     output_python_module = config['OUTPUT']['python_module']
+    output_layer_name = (None if config['OUTPUT']['output_layer'] == ''
+                         else config['OUTPUT']['output_layer'])
     verbose = config.getboolean('OPTIONAL', 'verbose')
     graphviz_path = config['OPTIONAL']['graphviz_path']
 except:
@@ -131,7 +134,8 @@ if not os.path.exists(output_folder):
 
 # Parse network
 network = cnn_parser.parse_network(network_def, network_data, network_type,
-                                   custom_layer, dim_override)
+                                   custom_layer, dim_override,
+                                   output_layer_name)
 fpga_net = fpga_layer.FPGANetwork(network, output_quantization)
 fpga_net.output_network(output_folder, network_name, output_gensource,
                         output_gendoc, output_gengraph, graphviz_path)

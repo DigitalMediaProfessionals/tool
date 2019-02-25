@@ -82,7 +82,8 @@ def get_weights(netweight, layer_name, need_flip, weight_entry):
     return weights
 
 
-def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
+def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False,
+                         output_layer_name=None):
     type_map = {
         'Conv1D': NodeType.Convolution,
         'Conv2D': NodeType.Convolution,
@@ -536,9 +537,14 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
 
     _set_node_output(node_map)
     global_output_nodes = []
-    for node in node_map.values():
-        if len(node.output_nodes) == 0:
-            global_output_nodes.append(node)
+    if output_layer_name:
+        node = node_map[output_layer_name]
+        node.output_nodes = []
+        global_output_nodes.append(node)
+    else:
+        for node in node_map.values():
+            if len(node.output_nodes) == 0:
+                global_output_nodes.append(node)
     return global_input_nodes, global_output_nodes, netarg_dict
 
 
@@ -554,7 +560,7 @@ def _set_node_output(node_map):
         finished.append(node)
 
 
-def parse_keras_network(network_data, custom_layer):
+def parse_keras_network(network_data, custom_layer, output_layer_name=None):
     logging.info('Parsing Keras network.')
 
     netarg_dict = {}
@@ -583,5 +589,6 @@ def parse_keras_network(network_data, custom_layer):
     netdef = keras_net.attrs['model_config']
     netweight = keras_net['model_weights']
     input_nodes, output_nodes, netarg_dict2 =\
-        parse_keras_network2(netdef, netweight, custom_layer, need_flip)
+        parse_keras_network2(netdef, netweight, custom_layer, need_flip,
+                             output_layer_name=output_layer_name)
     return input_nodes, output_nodes, {**netarg_dict2, **netarg_dict}

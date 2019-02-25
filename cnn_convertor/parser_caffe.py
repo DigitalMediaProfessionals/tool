@@ -50,7 +50,7 @@ def get_pad(param):
         return param, param, param, param
 
 
-def parse_caffe_def2(netdef: str):
+def parse_caffe_def2(netdef: str, output_layer_name: str = None):
     type_map = {
         'Convolution': NodeType.Convolution,
         'InnerProduct': NodeType.InnerProduct,
@@ -195,7 +195,12 @@ def parse_caffe_def2(netdef: str):
     _set_node_output(top_map)
     global_output_nodes = []
     for node in parsed_nodes:
-        if len(node.output_nodes) == 0:
+        if output_layer_name:
+            if node.name == output_layer_name:
+                global_output_nodes.append(node)
+                node.output_nodes = []
+                break
+        elif len(node.output_nodes) == 0:
             global_output_nodes.append(node)
 
     return global_input_nodes, global_output_nodes, network_argdict
@@ -214,11 +219,13 @@ def _set_node_output(top_map):
 
 
 def parse_caffe_def(
-    network_def: str
+    network_def: str,
+    output_layer_name: str = None
 ):
     logging.info('Parsing Caffe network definitions.')
     with open(network_def, 'r') as fin:
-        return parse_caffe_def2(fin.read())
+        return parse_caffe_def2(fin.read(),
+                                output_layer_name=output_layer_name)
 
 
 def search_caffe_layer(layers, name):
