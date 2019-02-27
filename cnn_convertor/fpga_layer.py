@@ -1475,9 +1475,9 @@ class FPGANetwork(object):
             return _lr
 
         allocated_size = 0  # size to be allocated
-        for index, lr in enumerate(reversed(live_ranges)):
-            index = len(live_ranges) - 1 - index
-
+        for lr in sorted(reversed(live_ranges),
+                         key=(lambda x : x.death_index),
+                         reverse=True):
             if lr.output_concat_lr:
                 offset = 0
                 for node in lr.output_concat_lr.layer.node_in.input_nodes:
