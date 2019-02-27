@@ -400,6 +400,11 @@ class Network(object):
             for _in in old.input_nodes:
                 _aux(_in.output_nodes, old, new, old.output_nodes)
 
+            if old in self.input_nodes:
+                _aux(self.input_nodes, old, new, None)
+            if old in self.output_nodes:
+                _aux(self.output_nodes, old, new, None)
+
         def _create_dummy_conv_node(node):
             # dummy convolution
             node = LayerNode(node.name, NodeType.Convolution, node.input_nodes)
@@ -480,6 +485,17 @@ class Network(object):
                             .format(node.name))
                     _out.param.pad_lrtb = node.param.pad_lrtb
                 _replace_node(node)
+
+        i = 0
+        for node in self.output_nodes[:]:
+            if node.type == NodeType.Convolution:
+                flatten = LayerNode("dmp_conv_flat_{}".format(i),
+                                    NodeType.Flatten,
+                                    node)
+                node.output_nodes = [flatten]
+                index = self.output_nodes.index(node)
+                self.output_nodes[index] = flatten
+                i += 1
 
     def append_input_node(self, node):
         self.input_nodes.append(node)
