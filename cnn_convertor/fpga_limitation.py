@@ -22,7 +22,7 @@ class Limitation(object):
     def __init__(self, model='DV700'):
         if model == 'DV700':
             self.max_conv_width = 2047
-            self.max_conv_height = 512
+            self.max_conv_height = 1024
             self.max_conv_depth = 15
             self.max_conv_channel = 32768
             self.max_conv_kernel = 7
