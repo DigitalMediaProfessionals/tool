@@ -759,7 +759,10 @@ def gen_source_conv(of, name, n, layer, quantization):
             p = run.conv.param.kernel_size[0]
             if run.conv.param.kernel_size[1] != run.conv.param.kernel_size[0]:
                 p |= (run.conv.param.kernel_size[1] << 8)
-            conv_enable = (1 if run.conv.param.group <= 1 else 3)
+            if run.conv.param.is_deconv:
+                conv_enable = (5 if run.conv.param.group <= 1 else 7)
+            else:
+                conv_enable = (1 if run.conv.param.group <= 1 else 3)
         else:
             p = 1
             conv_enable = 0
