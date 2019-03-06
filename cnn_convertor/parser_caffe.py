@@ -53,6 +53,7 @@ def get_pad(param):
 def parse_caffe_def2(netdef: str):
     type_map = {
         'Convolution': NodeType.Convolution,
+        'Deconvolution': NodeType.Convolution,
         'InnerProduct': NodeType.InnerProduct,
         'Scale': NodeType.Scale,
         'BatchNorm': NodeType.BatchNorm,
@@ -148,6 +149,7 @@ def parse_caffe_def2(netdef: str):
             network_argdict["debug_node"] = caffe_net
         elif node_type == NodeType.Convolution:
             param = cnn_layer.NodeParam()
+            param.is_deconv = (layer.type == "Deconvolution")
             param.num_output = int(layer.convolution_param.num_output)
             param.kernel_size = get_tuple(layer.convolution_param.kernel_size)
             param.pad_lrtb = get_pad(layer.convolution_param.pad)
