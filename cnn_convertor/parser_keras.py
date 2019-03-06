@@ -90,6 +90,8 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
         'DepthwiseConv2D': NodeType.Convolution,
         'SeparableConv1D': NodeType.Convolution,
         'SeparableConv2D': NodeType.Convolution,
+        'Conv2DTranpose': NodeType.Convolution,
+        'Conv1DTranpose': NodeType.Convolution,
         'Dense': NodeType.InnerProduct,
         'LRN': NodeType.LRN,
         'Concatenate': NodeType.Concat,
@@ -428,6 +430,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
                                      config['kernel_size'][0])
             param.keras_padding = config['padding']
             param.dilation = config['dilation_rate']
+            param.is_deconv = (layer_type[6:] == "Transpose")
             if is_1D:
                 param.stride = (config['strides'][0], 1)
             else:
