@@ -1124,7 +1124,7 @@ class FPGALayer(object):
 
 
 class FPGANetwork(object):
-    def __init__(self, net: cnn_layer.Network=None, quantization=True):
+    def __init__(self, net: cnn_layer.Network = None, quantization=True):
         self.layer = []
         self.output_layer = []
         self.num_output_layers = 0
@@ -1147,6 +1147,12 @@ class FPGANetwork(object):
                       NodeType.UpSampling]
         for node in net.traverse_list:
             if node.type in conv_types:
+                if node.param.is_deconv and dilation != 1 and stride != 1:
+                    msg = ("The stride {1} and the dilation {2} of layer{0} "
+                           "The stride for dilated deconvolution must be 1.")\
+                                    .format(node.name, node.param.stride,
+                                            node.param.dilation)
+                    raise cnn_exception.ConvertError(msg)
                 if node.input_dim[0] > limit.max_conv_width:
                     msg = ("The input width {1:d} of layer {0:s} "
                            "exceeds maximum supported by FPGA {2:d}").format(
