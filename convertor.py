@@ -37,9 +37,6 @@ parser = argparse.ArgumentParser(
     description="DNN to FPGA convertor",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("INPUT_INI", type=str, help="Input ini file")
-parser.add_argument("--max_fc_vector_size", type=int, default=16384,
-                    help="Maimum supported input vector size for "
-                    "Fully Connected layer")
 parser.add_argument("--max_kernel_size", type=int, default=7,
                     help="Maximum supported kernel size for "
                     "Convolutional Layer")
@@ -49,7 +46,6 @@ args = parser.parse_args()
 
 
 # Set limits
-fpga_layer.set_max_fc_vector_size(args.max_fc_vector_size)
 fpga_layer.set_max_kernel_size(args.max_kernel_size)
 fpga_layer.set_ub_size(args.ub_size)
 
