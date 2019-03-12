@@ -1156,7 +1156,8 @@ class FPGANetwork(object):
                       NodeType.UpSampling]
         for node in net.traverse_list:
             if node.type in conv_types:
-                if node.param.is_deconv and dilation != 1:
+                if node.param.is_deconv and\
+                   (node.param.dilation[0] > 1 or node.param.dilation[1] > 1):
                     msg = ("Dilated Deconvolution is not supported")
                     raise cnn_exception.ConvertError(msg)
                 if node.input_dim[0] > limit.max_conv_width:
