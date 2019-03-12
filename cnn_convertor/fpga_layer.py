@@ -214,10 +214,10 @@ def get_kernel_size_for_weight(node):
     return (p, p)
 
 
-def pack_conv_weight(node, of, quantization):
+def pack_conv_weight(node, of, quantization, is_tensorflow=False):
     logging.info('Packing weight for node: %s.', node.name)
     if node.param.dilation[0] == 1 and node.param.dilation[1] == 1:
-        _pack_conv_weight_nondil(node, of, quantization)
+        _pack_conv_weight_nondil(node, of, quantization, is_tensorflow)
     else:
         _pack_conv_weight_dil(node, of, quantization)
 
@@ -316,7 +316,7 @@ def _pack_conv_weight_dil(node, of, quantization):
         offs += pad
 
 
-def _pack_conv_weight_nondil(node, of, quantization):
+def _pack_conv_weight_nondil(node, of, quantization, is_tensorflow):
     n_c = node.input_dim[2]
     if node.param.group > 1:
         n_c = n_c // node.param.group
@@ -354,6 +354,12 @@ def _pack_conv_weight_nondil(node, of, quantization):
     buffer = np.zeros(shape=(12, 6), dtype=weight_type)
 
     labels.shape = (n_m, n_c, kernel_size[1], kernel_size[0])
+    if node.param.is_deconv:
+        if is_tensorflow:
+            labels.shape = (n_c, n_m, kernel_size[1], kernel_size[0])
+            labels = np.transpose(labels, [1, 0, 2, 3])
+        labels = labels[:, :, ::-1, ::-1]
+
     if quantization:
         centers.tofile(of)
         of.write(b'\0\0' * (256 - centers.size))
@@ -1555,7 +1561,8 @@ class FPGANetwork(object):
                 for run in layer.run:
                     if (run.conv is not None and
                             run.conv.type is NodeType.Convolution):
-                        pack_conv_weight(run.conv, of, self.quantization)
+                        pack_conv_weight(run.conv, of, self.quantization,
+                                         self.tensorflow_backend)
             elif layer.type is LayerType.InnerProduct:
                 pack_fc_weight(layer.node_in, prev_node, of, self.quantization)
             prev_node = layer.node_out
