@@ -221,15 +221,16 @@ def get_kernel_size_for_weight(node):
     return (p, p)
 
 
-def pack_conv_weight(node, of, quantization, is_tensorflow=False):
+def pack_conv_weight(node, of, quantization, transweight, is_tensorflow=False):
     logging.info('Packing weight for node: %s.', node.name)
     if node.param.dilation[0] == 1 and node.param.dilation[1] == 1:
-        _pack_conv_weight_nondil(node, of, quantization, is_tensorflow)
+        _pack_conv_weight_nondil(node, of, quantization, transweight,
+                                 is_tensorflow)
     else:
-        _pack_conv_weight_dil(node, of, quantization)
+        _pack_conv_weight_dil(node, of, quantization, transweight)
 
 
-def _pack_conv_weight_dil(node, of, quantization):
+def _pack_conv_weight_dil(node, of, quantization, transweight):
     # parameters
     n_c = node.input_dim[2]
     if node.param.group > 1:
@@ -238,6 +239,10 @@ def _pack_conv_weight_dil(node, of, quantization):
     kernel_size = node.param.kernel_size[:]
 
     weight = node.weight
+    if transweight and weight is not None:
+        weight.shape = (n_m, n_c, kernel_size[1], kernel_size[0])
+        weight = weight.transpose(0, 1, 3, 2).copy()
+        node.weight = weight
     bias = node.bias
     if weight is None or bias is None:
         if weight is None:
@@ -324,7 +329,8 @@ def _pack_conv_weight_dil(node, of, quantization):
         offs += pad
 
 
-def _pack_conv_weight_nondil(node, of, quantization, is_tf_backend):
+def _pack_conv_weight_nondil(node, of, quantization, transweight,
+                             is_tf_backend):
     n_c = node.input_dim[2]
     if node.param.group > 1:
         n_c = n_c // node.param.group
@@ -332,6 +338,10 @@ def _pack_conv_weight_nondil(node, of, quantization, is_tf_backend):
     kernel_size = get_kernel_size_for_weight(node)
 
     weight = node.weight
+    if transweight and weight is not None:
+        weight.shape = (n_m, n_c, kernel_size[1], kernel_size[0])
+        weight = weight.transpose(0, 1, 3, 2).copy()
+        node.weight = weight
     bias = node.bias
     if weight is None or bias is None:
         if weight is None:
@@ -645,6 +655,8 @@ def gen_source_header(of, name, net):
     of.write('  // Empty by design\n}\n\n')
     of.write('bool C{0}::Initialize() '.format(name))
     of.write('{\n')
+    if net.transweight:
+        of.write('  is_weight_transposed = true;  // The weight matrix is transposed.\n')
     of.write('  if (!ReserveMemory({0}, {1})) {{\n'.format(
         net.weight_size, net.buffer_size))
     of.write('    return false;\n')
@@ -656,7 +668,7 @@ def gen_source_header(of, name, net):
     of.write('\n  return true;\n}\n\n')
 
 
-def gen_source_conv(of, name, n, layer, quantization):
+def gen_source_conv(of, name, n, layer, quantization, transweight):
     global weight_offset
 
     of.write('//Layer_{0}: Convolution Layer\n'.format(n))
@@ -690,6 +702,8 @@ def gen_source_conv(of, name, n, layer, quantization):
     of.write('  conf.h = {0};  // Input Height\n'.format(layer.node_in.input_dim[1]))
     of.write('  conf.z = 1;  // Input Depth\n')
     of.write('  conf.c = {0};  // Input Channels\n'.format(layer.node_in.input_dim[2]))
+    if transweight:
+        of.write('  conf.input_circular_offset = 0x8000;  // The weight matrix is transposed.\n')
     of.write('  conf.input_buf.mem = io_mem_;\n'
              '  conf.input_buf.offs = {0};\n\n'.format(layer.layer_in[0].output_addr_offset))
     of.write('  // Output Configuration:\n')
@@ -816,7 +830,7 @@ def _is_input_hw_layout(layer):
     return False
 
 
-def gen_source_layer(of, name, n, layer, quantization):
+def gen_source_layer(of, name, n, layer, quantization, transweight):
     global output_index
     type_map = {LayerType.Input: 'LT_INPUT',
                 LayerType.Convolution: 'LT_CONV',
@@ -827,7 +841,7 @@ def gen_source_layer(of, name, n, layer, quantization):
                 LayerType.Custom: 'LT_CUSTOM'}
 
     if layer.type is LayerType.Convolution:
-        gen_source_conv(of, name, n, layer, quantization)
+        gen_source_conv(of, name, n, layer, quantization, transweight)
         of.write('\n')
     else:
         if layer.type is LayerType.Input:
@@ -1027,7 +1041,8 @@ class FPGALayer(object):
 
 
 class FPGANetwork(object):
-    def __init__(self, net: cnn_layer.Network = None, quantization=True):
+    def __init__(self, net: cnn_layer.Network=None, quantization=True,
+                 transweight=False):
         self.layer = []
         self.output_layer = []
         self.num_output_layers = 0
@@ -1035,6 +1050,7 @@ class FPGANetwork(object):
         self.buffer_size = 0
         self.custom_layer_config = {}
         self.quantization = quantization
+        self.transweight = transweight
         self.tensorflow_backend = net.tensorflow_backend
         if type(net) is cnn_layer.Network:
             self.original_net = net
@@ -1434,16 +1450,18 @@ class FPGANetwork(object):
         gen_source_header(of, name, self)
         for n, layer in enumerate(self.layer):
             layer.index = n
-            gen_source_layer(of, name, n, layer, self.quantization)
+            gen_source_layer(of, name, n, layer, self.quantization,
+                             self.transweight)
 
     def output_weights(self, of) -> None:
         for layer in self.layer:
             if layer.type is LayerType.Convolution:
                 for run in layer.run:
                     if (run.conv is not None and
-                            run.conv.type is (NodeType.Convolution,
+                            run.conv.type in (NodeType.Convolution,
                                               NodeType.InnerProduct)):
                         pack_conv_weight(run.conv, of, self.quantization,
+                                         self.transweight,
                                          self.tensorflow_backend)
 
     def output_network(self, output_folder: str, network_name: str,
