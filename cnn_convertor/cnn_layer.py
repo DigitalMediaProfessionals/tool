@@ -380,9 +380,9 @@ class Network(object):
                 _aux(_in.output_nodes, old, new, old.output_nodes)
 
             if old in self.input_nodes:
-                _aux(self.input_nodes, old, new, None)
+                _aux(self.input_nodes, old, new, old.output_nodes)
             if old in self.output_nodes:
-                _aux(self.output_nodes, old, new, None)
+                _aux(self.output_nodes, old, new, old.input_nodes)
 
         def _create_dummy_conv_node(node):
             # dummy convolution
