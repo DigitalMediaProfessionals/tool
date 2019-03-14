@@ -136,7 +136,7 @@ def calc_pool_tiles(node):
             return t
 
 
-def merge_bn_scale(node, kernel_size, n_c, n_m):
+def merge_bn_scale(node, kernel_size, n_c, n_m, is_tf_backend=False):
     weight = node.weight
     bias = node.bias
     if node.bn_node is not None and node.bn_node.mean is not None:
@@ -156,7 +156,10 @@ def merge_bn_scale(node, kernel_size, n_c, n_m):
     else:
         sc_bias = np.zeros_like(bias)
     e = 0.00001
-    weight.shape = (n_m, n_c * kernel_size[1] * kernel_size[0])
+    if node.param.is_deconv and is_tf_backend:
+        weight = np.reshape(weight, (n_c, n_m, kernel_size[1], kernel_size[0]))
+        weight = np.transpose(weight, [1, 0, 2, 3])
+    weight = np.reshape(weight, (n_m, n_c * kernel_size[1] * kernel_size[0]))
     for i in range(n_m):
         assert np.min(bn_var[i]) >= 0, "Invalid bn_var[%d]=%s" % (i, bn_var[i])
         norm = sc_weight[i] / math.sqrt(bn_var[i] + e)
@@ -239,6 +242,7 @@ def _pack_conv_weight_dil(node, of, quantization):
         if bias is None:
             bias = np.zeros((n_m,), np.float32)
         node.set_weight_bias(weight, bias)
+
     if node.bn_node is not None or node.sc_node is not None:
         weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m)
     if node.act_node and node.act_node.type == NodeType.PReLU:
@@ -316,7 +320,7 @@ def _pack_conv_weight_dil(node, of, quantization):
         offs += pad
 
 
-def _pack_conv_weight_nondil(node, of, quantization, is_tensorflow):
+def _pack_conv_weight_nondil(node, of, quantization, is_tf_backend):
     n_c = node.input_dim[2]
     if node.param.group > 1:
         n_c = n_c // node.param.group
@@ -334,7 +338,11 @@ def _pack_conv_weight_nondil(node, of, quantization, is_tensorflow):
         node.set_weight_bias(weight, bias)
 
     if node.bn_node is not None or node.sc_node is not None:
-        weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m)
+        weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m,
+                                      is_tf_backend)
+    elif node.param.is_deconv and is_tf_backend:
+        weight = np.reshape(weight, (n_c, n_m, kernel_size[1], kernel_size[0]))
+        weight = np.transpose(weight, [1, 0, 2, 3])
     if node.act_node and node.act_node.type == NodeType.PReLU:
         prelu = node.act_node.weight
     else:
@@ -355,9 +363,6 @@ def _pack_conv_weight_nondil(node, of, quantization, is_tensorflow):
 
     labels.shape = (n_m, n_c, kernel_size[1], kernel_size[0])
     if node.param.is_deconv:
-        if is_tensorflow:
-            labels.shape = (n_c, n_m, kernel_size[1], kernel_size[0])
-            labels = np.transpose(labels, [1, 0, 2, 3])
         labels = labels[:, :, ::-1, ::-1]
 
     if quantization:
