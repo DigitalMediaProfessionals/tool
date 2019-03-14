@@ -23,7 +23,7 @@ from enum import IntEnum, auto
 
 def get_deconv_out_width(width, kx, pad_left, pad_right, stride, dilation):
     return (pad_left + ((width - 1) * stride + 1) + pad_right
-            - ((kx - 1) * dilation + 1))
+            - ((kx - 1) * dilation + 1)) + 1
 
 
 def get_deconv_out_width_floor(width, kx, pad_left, pad_right, stride,
