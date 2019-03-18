@@ -22,8 +22,7 @@ from enum import IntEnum, auto
 
 
 def get_deconv_out_width(width, kx, pad_left, pad_right, stride, dilation):
-    return (pad_left + ((width - 1) * stride + 1) + pad_right
-            - ((kx - 1) * dilation + 1)) + 1
+    return stride * (width - 1) + kx - pad_left - pad_right
 
 
 def get_deconv_out_width_floor(width, kx, pad_left, pad_right, stride,
@@ -606,26 +605,26 @@ class Network(object):
                 while get_deconv_out_width_floor(
                         w, param.kernel_size[0], param.pad_lrtb[0],
                         param.pad_lrtb[1], param.stride[0],
-                        param.dilation[0]) < ow:
+                        param.dilation[0]) > ow:
                     _i = 0 if param.pad_lrtb[0] < param.pad_lrtb[1] else 1
                     param.pad_lrtb[_i] += 1
                 while get_deconv_out_width_floor(
                         h, param.kernel_size[1], param.pad_lrtb[2],
                         param.pad_lrtb[3], param.stride[1],
-                        param.dilation[1]) < oh:
+                        param.dilation[1]) > oh:
                     _i = 2 if param.pad_lrtb[2] < param.pad_lrtb[3] else 3
                     param.pad_lrtb[_i] += 1
                 # Decrease padding if necessary
                 while get_deconv_out_width_floor(
                         w, param.kernel_size[0], param.pad_lrtb[0],
                         param.pad_lrtb[1], param.stride[0],
-                        param.dilation[0]) > ow:
+                        param.dilation[0]) < ow:
                     _i = 0 if param.pad_lrtb[0] >= param.pad_lrtb[1] else 1
                     param.pad_lrtb[_i] -= 1
                 while get_deconv_out_width_floor(
                         h, param.kernel_size[1], param.pad_lrtb[2],
                         param.pad_lrtb[3], param.stride[1],
-                        param.dilation[1]) > oh:
+                        param.dilation[1]) < oh:
                     _i = 2 if param.pad_lrtb[2] >= param.pad_lrtb[3] else 3
                     param.pad_lrtb[_i] -= 1
 
