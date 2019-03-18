@@ -325,8 +325,8 @@ class Network(object):
         self.build_traverse_list()
         self._manipulate_node_graph()
         self.build_traverse_list()
-        self._check_support()
         self.calc_inout_sizes()
+        self._check_support()
 
     def _check_support(self):
         for node in self.traverse_list:
