@@ -403,13 +403,13 @@ class Network(object):
             if node.type is NodeType.BatchNorm:
                 # Merge BatchNormalization to previous Convolution
                 assert(len(node.input_nodes) == 1)
+                _in = node.input_nodes[0]
                 create_dummy = (not
-                                (node.input_nodes[0].type is NodeType.Convolution
-                                 and len(node.input_nodes[0].output_nodes) == 1))
-                if create_dummy:
-                    base_node = _create_dummy_conv_node(node)
-                else:
-                    base_node = node.input_nodes[0]
+                                (_in.type is NodeType.Convolution
+                                 and len(_in.output_nodes) == 1
+                                 and _in.bn_node is None))
+                base_node = (_create_dummy_conv_node(node)
+                             if create_dummy else _in)
 
                 bn_node = LayerNode(node.name, NodeType.BatchNorm)
                 bn_node.set_mean_var(node.mean, node.var)
@@ -423,13 +423,14 @@ class Network(object):
             elif node.type is NodeType.Scale:
                 # Merge Scale to previous Convolution
                 assert(len(node.input_nodes) == 1)
+                _in = node.input_nodes[0]
                 create_dummy = (not
-                                (node.input_nodes[0].type is NodeType.Convolution
-                                 and len(node.input_nodes[0].output_nodes) == 1))
-                if create_dummy:
-                    base_node = _create_dummy_conv_node(node)
-                else:
-                    base_node = node.input_nodes[0]
+                                (_in.type is NodeType.Convolution
+                                 and len(_in.output_nodes) == 1
+                                 and _in.sc_node is None))
+                base_node = (_create_dummy_conv_node(node)
+                             if create_dummy else _in)
+
                 sc_node = LayerNode(node.name, NodeType.Scale)
                 sc_node.set_weight_bias(node.weight, node.bias)
                 base_node.sc_node = sc_node
@@ -441,11 +442,10 @@ class Network(object):
                 _in = node.input_nodes[0]
                 create_dummy = not (_in.type in [NodeType.Convolution,
                                                  NodeType.InnerProduct]
-                                    and len(_in.output_nodes) == 1)
-                if create_dummy:
-                    base_node = _create_dummy_conv_node(node)
-                else:
-                    base_node = node.input_nodes[0]
+                                    and len(_in.output_nodes) == 1
+                                    and _in.act_node is None)
+                base_node = (_create_dummy_conv_node(node)
+                             if create_dummy else _in)
 
                 base_node.act_node = node
                 _replace_node(node, base_node if create_dummy else None)
