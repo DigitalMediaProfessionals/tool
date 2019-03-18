@@ -333,8 +333,8 @@ class Network(object):
             if node.type == NodeType.Concat:
                 if node.param.axis != len(node.output_dim) - 1:
                     raise cnn_exception.ParseError(
-                            'Unsupported axis for concatenation (%s):'
-                            'axis must be the last dimension'
+                            'Currently unsupported axis for concatenation'
+                            '(%s): axis must be the last dimension'
                             .format(node.name)
                             )
 
