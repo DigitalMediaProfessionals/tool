@@ -325,7 +325,18 @@ class Network(object):
         self.build_traverse_list()
         self._manipulate_node_graph()
         self.build_traverse_list()
+        self._check_support()
         self.calc_inout_sizes()
+
+    def _check_support(self):
+        for node in self.traverse_list:
+            if node.type == NodeType.Concat:
+                if node.param.axis != len(node.output_dim) - 1:
+                    raise cnn_exception.ParseError(
+                            'Unsupported axis for concatenation (%s):'
+                            'axis must be the last dimension'
+                            .format(node.name)
+                            )
 
     def build_traverse_list(self) -> None:
         pending = self.output_nodes[:]
