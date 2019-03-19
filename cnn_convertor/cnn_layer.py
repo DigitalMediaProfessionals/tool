@@ -37,7 +37,6 @@ class NodeType(IntEnum):
     InnerProduct = auto()
     Scale = auto()
     BatchNorm = auto()
-    LRN = auto()
     Concat = auto()
     Eltwise = auto()
     Pooling = auto()
