@@ -2610,20 +2610,6 @@ def output_page(of, network_name, gengraph, fpga_net):
                          str(run.pool.output_dim),
                          str(k),
                          mul_ops, add_ops))
-        if layer.type is fpga_layer.LayerType.InnerProduct:
-            c = layer.node_in.input_dim
-            d = layer.node_in.output_dim
-            mul_ops = c[-1] * d[-1]
-            add_ops = mul_ops
-            total_mul_ops += mul_ops
-            total_add_ops += add_ops
-            of.write('| {0}-0 | {1} | {2} | {3} | {4} | - | {5} | {6} | {7} |\n'.format(
-                     n, layer.node_in.name,
-                     str(layer.node_in.type),
-                     str(layer.node_in.input_dim),
-                     str(layer.node_in.output_dim),
-                     fpga_layer.get_fc_weight_size(layer.node_in, fpga_net.quantization),
-                     mul_ops, add_ops))
     of.write(
         '| SUM | - | - | - | - | - | - | {0} | {1} |\n'.format(total_mul_ops, total_add_ops))
     of.write('\n')

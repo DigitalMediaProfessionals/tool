@@ -735,8 +735,11 @@ class Network(object):
                     raise cnn_exception.ConvertError('Invalid dimension')
                 node.output_dim = dim
             elif node.type == NodeType.InnerProduct:
-                node.input_dim = dim
-                dim = (node.param.num_output,)
+                if len(dim) == 3:
+                    node.input_dim = dim
+                elif len(dim) == 1:
+                    node.input_dim = (1, 1, dim[0])
+                dim = (1, 1, node.param.num_output)
                 node.output_dim = dim
             elif node.type == NodeType.Pooling:
                 node.input_dim = dim
