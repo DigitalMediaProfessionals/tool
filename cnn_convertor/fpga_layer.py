@@ -509,8 +509,8 @@ def _get_weight_size_dil(inc, outc, kx, ky, quantization, use_prelu=False):
 
 
 def get_weight_size(node, quantization):
-    if node is None or (node.type is not NodeType.Convolution and
-            node.type is not NodeType.InnerProduct):
+    if node is None or node.type not in (
+            NodeType.Convolution, NodeType.InnerProduct):
         return 0
 
     inc = node.input_dim[2]
@@ -685,9 +685,8 @@ def gen_source_conv(of, name, n, layer, quantization):
     of.write('  // Runs Configuration:\n')
     of.write('  // ->{0} run(s)\n'.format(len(layer.run)))
     for i, run in enumerate(layer.run):
-        is_conv = run.conv is not None and (
-                run.conv.type is NodeType.Convolution or
-                run.conv.type is NodeType.InnerProduct)
+        is_conv = run.conv is not None and (run.conv.type in
+                  (NodeType.Convolution, NodeType.InnerProduct))
         is_lrn = run.conv is not None and run.conv.type is NodeType.LRN
         if is_conv:
             p = run.conv.param.kernel_size[0]
@@ -1097,9 +1096,7 @@ class FPGANetwork(object):
                 prev_node_type = tl[index - 1].type
             else:
                 prev_node_type = None
-            if (node.type is NodeType.Convolution or
-                    node.type is NodeType.LRN or
-                    node.type is NodeType.InnerProduct):
+            if node.type in (NodeType.Convolution, NodeType.InnerProduct):
                 self.pad_weight_matrix(node)
                 pass
             elif node.type is NodeType.Pooling:
@@ -1419,8 +1416,8 @@ class FPGANetwork(object):
             if layer.type is LayerType.Convolution:
                 for run in layer.run:
                     if (run.conv is not None and
-                            (run.conv.type is NodeType.Convolution or
-                             run.conv.type is NodeType.InnerProduct)):
+                            run.conv.type in (NodeType.Convolution,
+                                              NodeType.InnerProduct)):
                         pack_conv_weight(run.conv, of, self.quantization)
 
     def output_network(self, output_folder: str, network_name: str,
