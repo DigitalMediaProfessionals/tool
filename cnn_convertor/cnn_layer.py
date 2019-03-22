@@ -81,6 +81,7 @@ class NodeParam(object):
         self.kernel_size = (1, 1)
         self._pad = [0, 0, 0, 0]
         self.keras_padding = None
+        self._deconv_output_padding = [0, 0]
         self.stride = (1, 1)
         self.pool = 0  # 0:max, 1:avg
         self.group = 1
@@ -93,6 +94,14 @@ class NodeParam(object):
         self.split_pool_divisor = None
         self._dilation = [1, 1]
         self.is_deconv = False
+
+    @property
+    def deconv_output_padding(self):
+        return self._deconv_output_padding
+
+    @deconv_output_padding.setter
+    def deconv_output_padding(self, val):
+        self._deconv_output_padding = val or [0, 0]
 
     @property
     def dilation(self):

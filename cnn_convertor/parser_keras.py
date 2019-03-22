@@ -431,6 +431,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
             param.keras_padding = config['padding']
             param.dilation = config['dilation_rate']
             param.is_deconv = (layer_type[6:] == "Transpose")
+            param.deconv_output_padding = config.get("output_padding")
             if is_1D:
                 param.stride = (config['strides'][0], 1)
             else:
