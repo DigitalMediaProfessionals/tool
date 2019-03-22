@@ -21,14 +21,15 @@ from typing import List, Union, Tuple
 from enum import IntEnum, auto
 
 
-def get_deconv_out_width(width, kx, pad_left, pad_right, stride, dilation):
-    return stride * (width - 1) + kx - pad_left - pad_right
+def get_deconv_out_width(width, kx, pad_left, pad_right, stride,
+                         output_padding):
+    return stride * (width - 1) + kx - pad_left - pad_right + output_padding
 
 
 def get_deconv_out_width_floor(width, kx, pad_left, pad_right, stride,
-                               dilation):
+                               output_padding):
     return math.floor(get_deconv_out_width(width, kx, pad_left, pad_right,
-                                           stride, dilation))
+                                           stride, output_padding))
 
 
 def get_conv_out_width(width, kx, pad_left, pad_right, stride, dilation):
@@ -614,48 +615,48 @@ class Network(object):
                 while get_deconv_out_width_floor(
                         w, param.kernel_size[0], param.pad_lrtb[0],
                         param.pad_lrtb[1], param.stride[0],
-                        param.dilation[0]) > ow:
+                        param.deconv_output_padding[0]) > ow:
                     _i = 0 if param.pad_lrtb[0] < param.pad_lrtb[1] else 1
                     param.pad_lrtb[_i] += 1
                 while get_deconv_out_width_floor(
                         h, param.kernel_size[1], param.pad_lrtb[2],
                         param.pad_lrtb[3], param.stride[1],
-                        param.dilation[1]) > oh:
+                        param.deconv_output_padding[1]) > oh:
                     _i = 2 if param.pad_lrtb[2] < param.pad_lrtb[3] else 3
                     param.pad_lrtb[_i] += 1
                 # Decrease padding if necessary
                 while get_deconv_out_width_floor(
                         w, param.kernel_size[0], param.pad_lrtb[0],
                         param.pad_lrtb[1], param.stride[0],
-                        param.dilation[0]) < ow:
+                        param.deconv_output_padding[0]) < ow:
                     _i = 0 if param.pad_lrtb[0] >= param.pad_lrtb[1] else 1
                     param.pad_lrtb[_i] -= 1
                 while get_deconv_out_width_floor(
                         h, param.kernel_size[1], param.pad_lrtb[2],
                         param.pad_lrtb[3], param.stride[1],
-                        param.dilation[1]) < oh:
+                        param.deconv_output_padding[1]) < oh:
                     _i = 2 if param.pad_lrtb[2] >= param.pad_lrtb[3] else 3
                     param.pad_lrtb[_i] -= 1
 
                 assert get_deconv_out_width_floor(
                         w, param.kernel_size[0], param.pad_lrtb[0],
                         param.pad_lrtb[1], param.stride[0],
-                        param.dilation[0]) == ow
+                        param.deconv_output_padding[0]) == ow
                 assert get_deconv_out_width_floor(
                         h, param.kernel_size[1], param.pad_lrtb[2],
                         param.pad_lrtb[3], param.stride[1],
-                        param.dilation[1]) == oh
+                        param.deconv_output_padding[1]) == oh
 
             ow = get_deconv_out_width_floor(w, param.kernel_size[0],
                                             param.pad_lrtb[0],
                                             param.pad_lrtb[1],
                                             param.stride[0],
-                                            param.dilation[0])
+                                            param.deconv_output_padding[0])
             oh = get_deconv_out_width_floor(h, param.kernel_size[1],
                                             param.pad_lrtb[2],
                                             param.pad_lrtb[3],
                                             param.stride[1],
-                                            param.dilation[1])
+                                            param.deconv_output_padding[1])
             return ow, oh
 
         def get_output_xy(dim: Tuple[int],
