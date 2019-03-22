@@ -57,7 +57,6 @@ def parse_caffe_def2(netdef: str):
         'InnerProduct': NodeType.InnerProduct,
         'Scale': NodeType.Scale,
         'BatchNorm': NodeType.BatchNorm,
-        'LRN': NodeType.LRN,
         'Concat': NodeType.Concat,
         'Eltwise': NodeType.Eltwise,
         'Pooling': NodeType.Pooling,
@@ -180,9 +179,6 @@ def parse_caffe_def2(netdef: str):
         elif node_type == NodeType.InnerProduct:
             param = cnn_layer.NodeParam()
             param.num_output = int(layer.inner_product_param.num_output)
-            node.param = param
-        elif node_type == NodeType.LRN:
-            param = cnn_layer.NodeParam()
             node.param = param
         elif node_type == NodeType.Reshape:
             param = cnn_layer.NodeParam()

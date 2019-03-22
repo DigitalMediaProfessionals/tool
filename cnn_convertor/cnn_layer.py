@@ -48,7 +48,6 @@ class NodeType(IntEnum):
     InnerProduct = auto()
     Scale = auto()
     BatchNorm = auto()
-    LRN = auto()
     Concat = auto()
     Eltwise = auto()
     Pooling = auto()
@@ -370,6 +369,17 @@ class Network(object):
         self._manipulate_node_graph()
         self.build_traverse_list()
         self.calc_inout_sizes()
+        self._check_support()
+
+    def _check_support(self):
+        for node in self.traverse_list:
+            if node.type == NodeType.Concat:
+                if node.param.axis != len(node.output_dim) - 1:
+                    raise cnn_exception.ParseError(
+                            'Currently unsupported axis for concatenation'
+                            '(%s): axis must be the last dimension'
+                            .format(node.name)
+                            )
 
     def build_traverse_list(self) -> None:
         pending = self.output_nodes[:]
@@ -827,8 +837,11 @@ class Network(object):
                     raise cnn_exception.ConvertError('Invalid dimension')
                 node.output_dim = dim
             elif node.type == NodeType.InnerProduct:
-                node.input_dim = dim
-                dim = (node.param.num_output,)
+                if len(dim) == 3:
+                    node.input_dim = dim
+                elif len(dim) == 1:
+                    node.input_dim = (1, 1, dim[0])
+                dim = (1, 1, node.param.num_output)
                 node.output_dim = dim
             elif node.type == NodeType.Pooling:
                 node.input_dim = dim

@@ -93,7 +93,6 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
         'Conv2DTranspose': NodeType.Convolution,
         'Conv1DTranspose': NodeType.Convolution,
         'Dense': NodeType.InnerProduct,
-        'LRN': NodeType.LRN,
         'Concatenate': NodeType.Concat,
         'Add': NodeType.Eltwise,
         'MaxPooling1D': NodeType.Pooling,
@@ -391,6 +390,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
                 raise cnn_exception.ParseError(
                         'Unknown layer, Name: {}, Type: {}'.format(
                             layer_name, layer_type))
+
             node_type = type_map[layer_type]
         node = cnn_layer.LayerNode(layer_name, node_type, input_nodes)
 

@@ -27,7 +27,6 @@ from enum import IntEnum, auto
 
 
 MAX_RUN = 32
-MAX_FC_VECTOR_SIZE = 16384
 MAX_KERNEL_SIZE = 7
 MAX_UNIFIED_BUFFER_SIZE = 640 * 1024  # 640KB
 MEM_ALIGN = 128 // 8  # 128bit
@@ -42,11 +41,6 @@ def check_memalign():
 
 
 check_memalign()
-
-
-def set_max_fc_vector_size(n):
-    global MAX_FC_VECTOR_SIZE
-    MAX_FC_VECTOR_SIZE = n
 
 
 def set_max_kernel_size(n):
@@ -482,53 +476,6 @@ def _pack_conv_weight_nondil(node, of, quantization, is_tf_backend):
         np.zeros(16 - d, dtype=np.uint8).tofile(of)
 
 
-def pack_fc_weight(node, conv_node, of, quantization):
-    logging.info('Packing FC weight for node: %s.', node.name)
-
-    if quantization:
-        centers, labels = calc_kmeans(node.weight)
-        labels = labels.astype(np.uint8)
-    else:
-        labels = node.weight.astype(np.float16)
-    bias16 = node.bias.astype(np.float16)
-
-    offs = 0
-    if quantization:
-        centers.tofile(of)
-        offs += centers.nbytes
-    if conv_node is not None:
-        if len(conv_node.output_dim) == 3:
-            w, h, c = conv_node.output_dim
-        elif len(conv_node.output_dim) == 1:
-            w, h, c = 1, 1, conv_node.output_dim[0]
-        m = node.param.num_output
-        if w != 1 or h != 1:
-            logging.info('Reordering FC weight for node: %s.', node.name)
-            labels.shape = (m, c, h, w)
-            for n in range(m):
-                for d in range(0, c, 8):
-                    e = d + 8 if d + 8 < c else c
-                    tr_index8 = labels[n, d:e, :, :].transpose(2, 1, 0)
-                    labels[n, d:e, :, :] = tr_index8.reshape(e - d, h, w)
-    labels.tofile(of)
-    offs += labels.nbytes
-
-    d = offs & 15  # bias must be 16-bytes aligned
-    if d:
-        logging.info("Added %d zeros to align bias", 16 - d)
-        np.zeros(16 - d, dtype=np.uint8).tofile(of)
-        offs += 16 - d
-
-    bias16.tofile(of)
-    offs += bias16.nbytes
-
-    d = offs & 15  # add 0 padding so weight size will be 16-bytes aligned
-    if d:
-        logging.info("Added %d zeros to align bias size", 16 - d)
-        np.zeros(16 - d, dtype=np.uint8).tofile(of)
-        offs += 16 - d
-
-
 def _get_weight_size(inc, outc, kernel, quantization, use_prelu):
     """
     get weight size of non-dilation convolution
@@ -583,7 +530,8 @@ def _get_weight_size_dil(inc, outc, kx, ky, quantization, use_prelu=False):
 
 
 def get_weight_size(node, quantization):
-    if node is None or node.type is not NodeType.Convolution:
+    if node is None or node.type not in (
+            NodeType.Convolution, NodeType.InnerProduct):
         return 0
 
     inc = node.input_dim[2]
@@ -600,22 +548,6 @@ def get_weight_size(node, quantization):
         return _get_weight_size_dil(inc, outc, node.param.kernel_size[0],
                                     node.param.kernel_size[1], quantization,
                                     use_prelu)
-
-
-def get_fc_weight_size(node, quantization):
-    if len(node.input_dim) == 3:
-        w, h, c = node.input_dim
-    elif len(node.input_dim) == 1:
-        w, h, c = 1, 1, node.input_dim[0]
-    m = node.output_dim[0]
-    if quantization:
-        size = w * h * c * m + 512
-    else:
-        size = w * h * c * m * 2
-    size = (size + 0xf) & (~0xf)  # align to 16 bytes
-    size += m * 2
-    size = (size + 0xf) & (~0xf)  # align to 16 bytes
-    return size
 
 
 def gen_header_header(of, name, custom_layer_config):
@@ -774,8 +706,8 @@ def gen_source_conv(of, name, n, layer, quantization):
     of.write('  // Runs Configuration:\n')
     of.write('  // ->{0} run(s)\n'.format(len(layer.run)))
     for i, run in enumerate(layer.run):
-        is_conv = run.conv is not None and run.conv.type is NodeType.Convolution
-        is_lrn = run.conv is not None and run.conv.type is NodeType.LRN
+        is_conv = run.conv is not None and (run.conv.type in
+                  (NodeType.Convolution, NodeType.InnerProduct))
         if is_conv:
             p = run.conv.param.kernel_size[0]
             if run.conv.param.kernel_size[1] != run.conv.param.kernel_size[0]:
@@ -869,53 +801,7 @@ def gen_source_conv(of, name, n, layer, quantization):
         of.write('  conf.run[{0}].actfunc = {1};  // Activation Function: 0 = None, 1 = Tanh, 2 = Leaky ReLU, 3 = Sigmoid, 4 = PReLU, 5 = ELU, 6 = ReLU6\n'.format(i, actfunc))
         of.write('  conf.run[{0}].actfunc_param = 0x{1:X};  // Leaky ReLU parameter (NOTE: 0x2E66 is 0.1 in FP16)\n'.format(i, actparam))
         of.write('  conf.run[{0}].rectifi_en = 0;  // Rectification, i.e. max(0, x) (NOTE: Can be applied after non-ReLU activation function)\n'.format(i))
-        of.write('  conf.run[{0}].lrn = 0x{1:X};  // [0] : 1 = LRN enable, 0 = LRN disable, [1] : 1 = incl. power func, 0 = excl., [8:11] = x^2 scale factor log2\n'.format(i, (0x503 if is_lrn else 0)))
         weight_offset += get_weight_size(run.conv, quantization)
-
-
-def gen_source_fc(of, name, n, layer, quantization):
-    global weight_offset
-    node = layer.node_in
-    if len(node.input_dim) == 3:
-        w, h, c = node.input_dim
-    elif len(node.input_dim) == 1:
-        w, h, c = 1, 1, node.input_dim[0]
-    m = node.output_dim[0]
-    size = get_fc_weight_size(node, quantization)
-    actfunc = 0
-    actparam = 0
-    if node.act_node:
-        if node.act_node.type == NodeType.ReLU:
-            actfunc = 1
-            if node.act_node.param.relu_param != 0.0:
-                actfunc = 3
-                actparam = np.float16(node.act_node.param.relu_param).view(np.uint16)
-        elif node.act_node.type == NodeType.TanH:
-            actfunc = 2
-        elif node.act_node.type == NodeType.Sigmoid:
-            actfunc = 4
-        else:
-            raise ValueError("Unsupported activation: %s" % node.act_node.type)
-    of.write('// Layer_{0}: Fully Connected Layer\n'.format(n))
-    of.write('//	->: {0}\n'.format(node.name))
-    of.write('void C{0}::Layer_{1}() '.format(name, n))
-    of.write('{\n')
-    of.write('  dmp_dv_cmdraw_fc_v0& conf = get_layer({0}).fc_conf;\n'.format(n))
-    of.write('  conf.header.size = sizeof(conf);\n')
-    of.write('  conf.header.version = 0;\n')
-    of.write('  conf.header.device_type = DMP_DV_DEV_FC;\n')
-    of.write('  conf.input_size = {0};\n'.format(w * h * c))
-    of.write('  conf.output_size = {0};\n'.format(m))
-    of.write('  conf.weight_buf.mem = weights_mem_;\n'
-             '  conf.weight_buf.offs = {0};\n'.format(weight_offset))
-    of.write('  conf.input_buf.mem = io_mem_;\n'
-             '  conf.input_buf.offs = {0};\n'.format(layer.layer_in[0].output_addr_offset))
-    of.write('  conf.output_buf.mem = io_mem_;\n'
-             '  conf.output_buf.offs = {0};\n'.format(layer.output_addr_offset))
-    of.write('  conf.weight_fmt = {0};  // 0 = unquantized weight matrix, 1 = qunatized\n'.format((1 if quantization else 0)))
-    of.write('  conf.actfunc = {0};  // Activation Function: 0 = None, 1 = ReLU, 2 = Tanh, 3 = Leaky ReLU, 4 = Sigmoid, 5 = PReLU (PReLU must be used with POST-OP=1)\n'.format(actfunc))
-    of.write('  conf.actfunc_param = 0x{0:X};  // Leaky ReLU parameter (in FP16 format), 0 = non-leaky\n'.format(actparam))
-    weight_offset += size
 
 
 def _is_input_hw_layout(layer):
@@ -934,7 +820,6 @@ def gen_source_layer(of, name, n, layer, quantization):
     global output_index
     type_map = {LayerType.Input: 'LT_INPUT',
                 LayerType.Convolution: 'LT_CONV',
-                LayerType.InnerProduct: 'LT_FC',
                 LayerType.Flatten: 'LT_FLATTEN',
                 LayerType.Concatenate: 'LT_CONCAT',
                 LayerType.CopyConcatenate: 'LT_COPY_CONCAT',
@@ -943,9 +828,6 @@ def gen_source_layer(of, name, n, layer, quantization):
 
     if layer.type is LayerType.Convolution:
         gen_source_conv(of, name, n, layer, quantization)
-        of.write('\n')
-    elif layer.type is LayerType.InnerProduct:
-        gen_source_fc(of, name, n, layer, quantization)
         of.write('\n')
     else:
         if layer.type is LayerType.Input:
@@ -1035,7 +917,6 @@ class FPGARun(object):
 class LayerType(IntEnum):
     Input = auto()
     Convolution = auto()
-    InnerProduct = auto()
     Flatten = auto()
     Concatenate = auto()
     CopyConcatenate = auto()
@@ -1062,7 +943,7 @@ class FPGALayer(object):
         # append runs
         run = FPGARun()
         for node in nodes:
-            if node.type in (NodeType.Convolution, NodeType.LRN):
+            if node.type in (NodeType.Convolution, NodeType.InnerProduct):
                 if run.conv:
                     self.run.append(run)
                     run = FPGARun()
@@ -1089,8 +970,6 @@ class FPGALayer(object):
                 run = FPGARun()
             elif node.type is NodeType.Input:
                 self.type = LayerType.Input
-            elif node.type is NodeType.InnerProduct:
-                self.type = LayerType.InnerProduct
             elif node.type is NodeType.Flatten:
                 self.type = LayerType.Flatten
             elif node.type is NodeType.Concat:
@@ -1152,8 +1031,6 @@ class FPGANetwork(object):
         self.layer = []
         self.output_layer = []
         self.num_output_layers = 0
-        self.num_conv_layers = 0
-        self.num_fc_layers = 0
         self.weight_size = 0
         self.buffer_size = 0
         self.custom_layer_config = {}
@@ -1167,8 +1044,8 @@ class FPGANetwork(object):
 
     def check_limitation(self, net: cnn_layer.Network) -> None:
         limit = fpga_limitation.Limitation()
-        conv_types = [NodeType.Convolution, NodeType.LRN, NodeType.Pooling,
-                      NodeType.UpSampling]
+        conv_types = (NodeType.Convolution, NodeType.Pooling,
+                      NodeType.UpSampling)
         for node in net.traverse_list:
             if node.type in conv_types:
                 if node.param.is_deconv and\
@@ -1205,11 +1082,11 @@ class FPGANetwork(object):
                     logging.error(msg)
                     raise cnn_exception.ConvertError(msg)
             if node.type is NodeType.InnerProduct:
-                if node.input_dim[-1] > limit.max_fc_channel:
+                if node.input_dim[-1] > limit.max_conv_channel:
                     msg = ("The input channels {1:d} of layer {0:s} "
                            "exceed maximum supported by FPGA {2:d}".format(
                                node.name, node.input_dim[-1],
-                               limit.max_fc_channel))
+                               limit.max_conv_channel))
                     logging.error(msg)
                     raise cnn_exception.ConvertError(msg)
 
@@ -1244,8 +1121,7 @@ class FPGANetwork(object):
                 prev_node_type = tl[index - 1].type
             else:
                 prev_node_type = None
-            if (node.type is NodeType.Convolution or
-                    node.type is NodeType.LRN):
+            if node.type in (NodeType.Convolution, NodeType.InnerProduct):
                 self.pad_weight_matrix(node)
                 pass
             elif node.type is NodeType.Pooling:
@@ -1267,8 +1143,6 @@ class FPGANetwork(object):
                 node.output_size = sum(
                         [x.output_size for x in node.input_nodes])
             elif node.type is NodeType.Eltwise:
-                pass
-            elif node.type is NodeType.InnerProduct:
                 pass
             elif node.type is NodeType.Flatten:
                 node.output_size = node.input_nodes[0].output_size
@@ -1420,13 +1294,8 @@ class FPGANetwork(object):
         for index, layer in enumerate(self.layer):
             # calc weight and increment the counter
             if layer.type is LayerType.Convolution:
-                self.num_conv_layers += 1
                 for run in layer.run:
                     weight_size += get_weight_size(run.conv, self.quantization)
-            elif layer.type is LayerType.InnerProduct:
-                self.num_fc_layers += 1
-                weight_size += get_fc_weight_size(layer.node_in,
-                                                  self.quantization)
 
             # add to output_layer
             if layer.is_output:
@@ -1568,17 +1437,14 @@ class FPGANetwork(object):
             gen_source_layer(of, name, n, layer, self.quantization)
 
     def output_weights(self, of) -> None:
-        prev_node = None
         for layer in self.layer:
             if layer.type is LayerType.Convolution:
                 for run in layer.run:
                     if (run.conv is not None and
-                            run.conv.type is NodeType.Convolution):
+                            run.conv.type is (NodeType.Convolution,
+                                              NodeType.InnerProduct)):
                         pack_conv_weight(run.conv, of, self.quantization,
                                          self.tensorflow_backend)
-            elif layer.type is LayerType.InnerProduct:
-                pack_fc_weight(layer.node_in, prev_node, of, self.quantization)
-            prev_node = layer.node_out
 
     def output_network(self, output_folder: str, network_name: str,
                        gensrc: bool, gendoc: bool, gengraph: bool,
