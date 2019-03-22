@@ -187,8 +187,31 @@ class NodeParam(object):
         """Returns integer in FPGA hardware format for padding.
         """
         assert len(self.pad_lrtb) == 4
-        return (self.pad_lrtb[0] | (self.pad_lrtb[1] << 8) |
-                (self.pad_lrtb[2] << 16) | (self.pad_lrtb[3] << 24))
+        if self.is_deconv:
+            pad_lrtb = [0, 0, 0, 0]
+            kw = self.dilation[0] * (self.kernel_size[0] - 1) + 1
+            kh = self.dilation[1] * (self.kernel_size[1] - 1) + 1
+            pad_lrtb[0] = kw - self.pad_lrtb[0] - 1
+            pad_lrtb[1] = kw - self.pad_lrtb[1] - 1
+            pad_lrtb[2] = kh - self.pad_lrtb[2] - 1
+            pad_lrtb[3] = kh - self.pad_lrtb[3] - 1
+
+            opad = self.deconv_output_padding
+            if self.keras_padding == "valid":
+                pad_lrtb[1] += opad[0]
+                pad_lrtb[3] += opad[1]
+            elif self.keras_padding == "same":
+                opad_l = opad[0] // 2 + (opad[0] & 1 if (kw & 1) else 0)
+                pad_lrtb[0] += opad_l
+                pad_lrtb[1] += opad[0] - opad_l
+                opad_t = opad[1] // 2 + (opad[1] & 1 if (kh & 1) else 0)
+                pad_lrtb[2] += opad_t
+                pad_lrtb[3] += opad[1] - opad_t
+
+        else:
+            pad_lrtb = self.pad_lrtb
+        return (pad_lrtb[0] | (pad_lrtb[1] << 8) | (pad_lrtb[2] << 16)
+                | (pad_lrtb[3] << 24))
 
     @pad_fpga.setter
     def pad_fpga(self, value):
