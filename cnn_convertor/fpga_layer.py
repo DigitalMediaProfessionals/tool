@@ -20,7 +20,8 @@ import logging
 import numpy as np
 import itertools
 from cnn_convertor import cnn_layer, cnn_exception, cnn_docgen
-from cnn_convertor.cnn_layer import NodeType, get_conv_out_width_floor
+from cnn_convertor.cnn_layer import NodeType, get_conv_out_width_floor,\
+                                    get_deconv_out_width_floor
 from cnn_convertor import fpga_limitation
 from enum import IntEnum, auto
 
@@ -88,15 +89,24 @@ def calc_conv_tiles(node):
     pad_lrtb = node.param.pad_lrtb
     stride = node.param.stride
     dilation = node.param.dilation
+    deconv_output_padding = node.param.deconv_output_padding
     c_blocks = (c >> 3) + (1 if c & 7 else 0)
     t = 0
     while True:
         t += 1
         tw = divup(w, t) + p - 1  # width of tile
-        ow = get_conv_out_width_floor(tw, p, pad_lrtb[0], pad_lrtb[1],
-                                      stride[0], dilation[0])
-        oh = get_conv_out_width_floor(h, p, pad_lrtb[2], pad_lrtb[3],
-                                      stride[1], dilation[1])
+        if node.param.is_deconv:
+            ow = get_deconv_out_width_floor(tw, p, pad_lrtb[0], pad_lrtb[1],
+                                            stride[0],
+                                            deconv_output_padding[0])
+            oh = get_deconv_out_width_floor(h, p, pad_lrtb[2], pad_lrtb[3],
+                                            stride[1],
+                                            deconv_output_padding[1])
+        else:
+            ow = get_conv_out_width_floor(tw, p, pad_lrtb[0], pad_lrtb[1],
+                                          stride[0], dilation[0])
+            oh = get_conv_out_width_floor(h, p, pad_lrtb[2], pad_lrtb[3],
+                                          stride[1], dilation[1])
         os = ow * oh * min(8, m)  # output buffer size
         ts_1c = tw * h  # tile size for single channel
         ts_blk16 = ts_1c * min(8, c)
@@ -130,7 +140,7 @@ def calc_pool_tiles(node):
             return t
 
 
-def merge_bn_scale(node, kernel_size, n_c, n_m):
+def merge_bn_scale(node, kernel_size, n_c, n_m, is_tf_backend=False):
     weight = node.weight
     bias = node.bias
     if node.bn_node is not None and node.bn_node.mean is not None:
@@ -150,7 +160,10 @@ def merge_bn_scale(node, kernel_size, n_c, n_m):
     else:
         sc_bias = np.zeros_like(bias)
     e = 0.00001
-    weight.shape = (n_m, n_c * kernel_size[1] * kernel_size[0])
+    if node.param.is_deconv and is_tf_backend:
+        weight = np.reshape(weight, (n_c, n_m, kernel_size[1], kernel_size[0]))
+        weight = np.transpose(weight, [1, 0, 2, 3])
+    weight = np.reshape(weight, (n_m, n_c * kernel_size[1] * kernel_size[0]))
     for i in range(n_m):
         assert np.min(bn_var[i]) >= 0, "Invalid bn_var[%d]=%s" % (i, bn_var[i])
         norm = sc_weight[i] / math.sqrt(bn_var[i] + e)
@@ -208,10 +221,10 @@ def get_kernel_size_for_weight(node):
     return (p, p)
 
 
-def pack_conv_weight(node, of, quantization):
+def pack_conv_weight(node, of, quantization, is_tensorflow=False):
     logging.info('Packing weight for node: %s.', node.name)
     if node.param.dilation[0] == 1 and node.param.dilation[1] == 1:
-        _pack_conv_weight_nondil(node, of, quantization)
+        _pack_conv_weight_nondil(node, of, quantization, is_tensorflow)
     else:
         _pack_conv_weight_dil(node, of, quantization)
 
@@ -233,6 +246,7 @@ def _pack_conv_weight_dil(node, of, quantization):
         if bias is None:
             bias = np.zeros((n_m,), np.float32)
         node.set_weight_bias(weight, bias)
+
     if node.bn_node is not None or node.sc_node is not None:
         weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m)
     if node.act_node and node.act_node.type == NodeType.PReLU:
@@ -310,7 +324,7 @@ def _pack_conv_weight_dil(node, of, quantization):
         offs += pad
 
 
-def _pack_conv_weight_nondil(node, of, quantization):
+def _pack_conv_weight_nondil(node, of, quantization, is_tf_backend):
     n_c = node.input_dim[2]
     if node.param.group > 1:
         n_c = n_c // node.param.group
@@ -328,7 +342,11 @@ def _pack_conv_weight_nondil(node, of, quantization):
         node.set_weight_bias(weight, bias)
 
     if node.bn_node is not None or node.sc_node is not None:
-        weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m)
+        weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m,
+                                      is_tf_backend)
+    elif node.param.is_deconv and is_tf_backend:
+        weight = np.reshape(weight, (n_c, n_m, kernel_size[1], kernel_size[0]))
+        weight = np.transpose(weight, [1, 0, 2, 3])
     if node.act_node and node.act_node.type == NodeType.PReLU:
         prelu = node.act_node.weight
     else:
@@ -348,6 +366,9 @@ def _pack_conv_weight_nondil(node, of, quantization):
     buffer = np.zeros(shape=(12, 6), dtype=weight_type)
 
     labels.shape = (n_m, n_c, kernel_size[1], kernel_size[0])
+    if node.param.is_deconv:
+        labels = labels[:, :, ::-1, ::-1]
+
     if quantization:
         centers.tofile(of)
         of.write(b'\0\0' * (256 - centers.size))
@@ -691,7 +712,10 @@ def gen_source_conv(of, name, n, layer, quantization):
             p = run.conv.param.kernel_size[0]
             if run.conv.param.kernel_size[1] != run.conv.param.kernel_size[0]:
                 p |= (run.conv.param.kernel_size[1] << 8)
-            conv_enable = (1 if run.conv.param.group <= 1 else 3)
+            if run.conv.param.is_deconv:
+                conv_enable = (5 if run.conv.param.group <= 1 else 7)
+            else:
+                conv_enable = (1 if run.conv.param.group <= 1 else 3)
         else:
             p = 1
             conv_enable = 0
@@ -1003,7 +1027,7 @@ class FPGALayer(object):
 
 
 class FPGANetwork(object):
-    def __init__(self, net: cnn_layer.Network=None, quantization=True):
+    def __init__(self, net: cnn_layer.Network = None, quantization=True):
         self.layer = []
         self.output_layer = []
         self.num_output_layers = 0
@@ -1024,6 +1048,10 @@ class FPGANetwork(object):
                       NodeType.UpSampling)
         for node in net.traverse_list:
             if node.type in conv_types:
+                if node.param.is_deconv and\
+                   (node.param.dilation[0] > 1 or node.param.dilation[1] > 1):
+                    msg = ("Dilated Deconvolution is not supported")
+                    raise cnn_exception.ConvertError(msg)
                 if node.input_dim[0] > limit.max_conv_width:
                     msg = ("The input width {1:d} of layer {0:s} "
                            "exceeds maximum supported by FPGA {2:d}").format(
@@ -1413,9 +1441,10 @@ class FPGANetwork(object):
             if layer.type is LayerType.Convolution:
                 for run in layer.run:
                     if (run.conv is not None and
-                            run.conv.type in (NodeType.Convolution,
+                            run.conv.type is (NodeType.Convolution,
                                               NodeType.InnerProduct)):
-                        pack_conv_weight(run.conv, of, self.quantization)
+                        pack_conv_weight(run.conv, of, self.quantization,
+                                         self.tensorflow_backend)
 
     def output_network(self, output_folder: str, network_name: str,
                        gensrc: bool, gendoc: bool, gengraph: bool,

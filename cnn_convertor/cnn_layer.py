@@ -21,6 +21,17 @@ from typing import List, Union, Tuple
 from enum import IntEnum, auto
 
 
+def get_deconv_out_width(width, kx, pad_left, pad_right, stride,
+                         output_padding):
+    return stride * (width - 1) + kx - pad_left - pad_right + output_padding
+
+
+def get_deconv_out_width_floor(width, kx, pad_left, pad_right, stride,
+                               output_padding):
+    return math.floor(get_deconv_out_width(width, kx, pad_left, pad_right,
+                                           stride, output_padding))
+
+
 def get_conv_out_width(width, kx, pad_left, pad_right, stride, dilation):
     return (pad_left + width + pad_right - ((kx - 1) * dilation + 1))\
             / stride + 1
@@ -70,6 +81,7 @@ class NodeParam(object):
         self.kernel_size = (1, 1)
         self._pad = [0, 0, 0, 0]
         self.keras_padding = None
+        self._deconv_output_padding = [0, 0]
         self.stride = (1, 1)
         self.pool = 0  # 0:max, 1:avg
         self.group = 1
@@ -81,6 +93,15 @@ class NodeParam(object):
         self.scale = 1.0
         self.split_pool_divisor = None
         self._dilation = [1, 1]
+        self.is_deconv = False
+
+    @property
+    def deconv_output_padding(self):
+        return self._deconv_output_padding
+
+    @deconv_output_padding.setter
+    def deconv_output_padding(self, val):
+        self._deconv_output_padding = val or [0, 0]
 
     @property
     def dilation(self):
@@ -165,8 +186,31 @@ class NodeParam(object):
         """Returns integer in FPGA hardware format for padding.
         """
         assert len(self.pad_lrtb) == 4
-        return (self.pad_lrtb[0] | (self.pad_lrtb[1] << 8) |
-                (self.pad_lrtb[2] << 16) | (self.pad_lrtb[3] << 24))
+        if self.is_deconv:
+            pad_lrtb = [0, 0, 0, 0]
+            kw = self.dilation[0] * (self.kernel_size[0] - 1) + 1
+            kh = self.dilation[1] * (self.kernel_size[1] - 1) + 1
+            pad_lrtb[0] = kw - self.pad_lrtb[0] - 1
+            pad_lrtb[1] = kw - self.pad_lrtb[1] - 1
+            pad_lrtb[2] = kh - self.pad_lrtb[2] - 1
+            pad_lrtb[3] = kh - self.pad_lrtb[3] - 1
+
+            opad = self.deconv_output_padding
+            if self.keras_padding == "valid":
+                pad_lrtb[1] += opad[0]
+                pad_lrtb[3] += opad[1]
+            elif self.keras_padding == "same":
+                opad_l = opad[0] // 2 + (opad[0] & 1 if (kw & 1) else 0)
+                pad_lrtb[0] += opad_l
+                pad_lrtb[1] += opad[0] - opad_l
+                opad_t = opad[1] // 2 + (opad[1] & 1 if (kh & 1) else 0)
+                pad_lrtb[2] += opad_t
+                pad_lrtb[3] += opad[1] - opad_t
+
+        else:
+            pad_lrtb = self.pad_lrtb
+        return (pad_lrtb[0] | (pad_lrtb[1] << 8) | (pad_lrtb[2] << 16)
+                | (pad_lrtb[3] << 24))
 
     @pad_fpga.setter
     def pad_fpga(self, value):
@@ -608,6 +652,62 @@ class Network(object):
         return flat_node
 
     def calc_inout_sizes(self):
+        def get_output_xy_deconv(dim, param):
+            w, h = dim[0], dim[1]
+
+            # set padding
+            if param.keras_padding == "same":
+                ow = math.ceil(float(w) / param.stride[0])
+                oh = math.ceil(float(h) / param.stride[1])
+
+                # Increase padding if necessary
+                while get_deconv_out_width_floor(
+                        w, param.kernel_size[0], param.pad_lrtb[0],
+                        param.pad_lrtb[1], param.stride[0],
+                        param.deconv_output_padding[0]) > ow:
+                    _i = 0 if param.pad_lrtb[0] < param.pad_lrtb[1] else 1
+                    param.pad_lrtb[_i] += 1
+                while get_deconv_out_width_floor(
+                        h, param.kernel_size[1], param.pad_lrtb[2],
+                        param.pad_lrtb[3], param.stride[1],
+                        param.deconv_output_padding[1]) > oh:
+                    _i = 2 if param.pad_lrtb[2] < param.pad_lrtb[3] else 3
+                    param.pad_lrtb[_i] += 1
+                # Decrease padding if necessary
+                while get_deconv_out_width_floor(
+                        w, param.kernel_size[0], param.pad_lrtb[0],
+                        param.pad_lrtb[1], param.stride[0],
+                        param.deconv_output_padding[0]) < ow:
+                    _i = 0 if param.pad_lrtb[0] >= param.pad_lrtb[1] else 1
+                    param.pad_lrtb[_i] -= 1
+                while get_deconv_out_width_floor(
+                        h, param.kernel_size[1], param.pad_lrtb[2],
+                        param.pad_lrtb[3], param.stride[1],
+                        param.deconv_output_padding[1]) < oh:
+                    _i = 2 if param.pad_lrtb[2] >= param.pad_lrtb[3] else 3
+                    param.pad_lrtb[_i] -= 1
+
+                assert get_deconv_out_width_floor(
+                        w, param.kernel_size[0], param.pad_lrtb[0],
+                        param.pad_lrtb[1], param.stride[0],
+                        param.deconv_output_padding[0]) == ow
+                assert get_deconv_out_width_floor(
+                        h, param.kernel_size[1], param.pad_lrtb[2],
+                        param.pad_lrtb[3], param.stride[1],
+                        param.deconv_output_padding[1]) == oh
+
+            ow = get_deconv_out_width_floor(w, param.kernel_size[0],
+                                            param.pad_lrtb[0],
+                                            param.pad_lrtb[1],
+                                            param.stride[0],
+                                            param.deconv_output_padding[0])
+            oh = get_deconv_out_width_floor(h, param.kernel_size[1],
+                                            param.pad_lrtb[2],
+                                            param.pad_lrtb[3],
+                                            param.stride[1],
+                                            param.deconv_output_padding[1])
+            return ow, oh
+
         def get_output_xy(dim: Tuple[int],
                           param: NodeParam,
                           is_pool: bool) -> Tuple[int]:
@@ -616,6 +716,9 @@ class Network(object):
                 raise cnn_exception.ConvertError(
                     "get_output_xy() must not be called on "
                     "global pooling layers")
+
+            if param.is_deconv:
+                return get_output_xy_deconv(dim, param)
 
             w, h = dim[0], dim[1]
 
