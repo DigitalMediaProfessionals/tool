@@ -995,10 +995,12 @@ class FPGALayer(object):
                     need_copy = False
                     # ignore the last input node
                     for node_in in node.input_nodes[:-1]:
-                        if (node_in.type is NodeType.Convolution and
-                                (node_in.output_dim[-1] % 8 != 0 or
-                                 node_in.output_size !=
-                                    make_align_size(node_in.output_size))):
+                        if (node_in.type in (NodeType.Convolution,
+                                             NodeType.Pooling,
+                                             NodeType.InnerProduct)
+                            and ((node_in.output_dim[-1] % 8 != 0) or
+                                 (node_in.output_size !=
+                                  make_align_size(node_in.output_size)))):
                             need_copy = True
                             break
                     if need_copy:
