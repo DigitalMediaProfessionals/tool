@@ -1119,8 +1119,11 @@ class FPGANetwork(object):
             m = conv_node.output_dim[2]
             weight = conv_node.weight
             weight.shape = (m, c, filter_sizeh, filter_sizew)
-            weight = np.pad(weight, ((0, 0), (0, 0), (padh, 0), (0, padw)),
-                            'constant')
+            pad_width = ((0, 0), (0, 0)) +\
+                        (((0, padh), (padw, 0))
+                         if conv_node.param.is_deconv
+                         else ((padh, 0), (0, padw)))
+            weight = np.pad(weight, pad_width, 'constant')
             conv_node.weight = weight
 
     def convert_network(self, net: cnn_layer.Network) -> None:
