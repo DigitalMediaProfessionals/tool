@@ -468,7 +468,7 @@ class Network(object):
                 bn_node = LayerNode(node.name, NodeType.BatchNorm)
                 bn_node.set_mean_var(node.mean, node.var)
                 base_node.bn_node = bn_node
-                if node.weight is not None and node.bias is not None:
+                if node.weight is not None or node.bias is not None:
                     sc_node = LayerNode(node.name, NodeType.Scale)
                     sc_node.set_weight_bias(node.weight, node.bias)
                     base_node.sc_node = sc_node
