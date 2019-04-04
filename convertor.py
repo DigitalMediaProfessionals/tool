@@ -60,7 +60,7 @@ config.read_dict({'INPUT': {'custom_layer': '',
                              'generate_doxy': 0,
                              'generate_dot': 0,
                              'quantization': 1,
-                             'transpose_weight': 0,
+                             'transpose_weight': 1,
                              'python_module': ''},
                   'OPTIONAL': {'verbose': 0,
                                'graphviz_path': ''}
