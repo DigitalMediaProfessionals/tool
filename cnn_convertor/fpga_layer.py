@@ -140,7 +140,7 @@ def calc_pool_tiles(node):
             return t
 
 
-def merge_bn_scale(node, kernel_size, n_c, n_m, is_tf_backend=False):
+def merge_bn_scale(node, kernel_size, n_c, n_m):
     weight = node.weight
     bias = node.bias
     if node.bn_node is not None and node.bn_node.mean is not None:
@@ -160,9 +160,6 @@ def merge_bn_scale(node, kernel_size, n_c, n_m, is_tf_backend=False):
     else:
         sc_bias = np.zeros_like(bias)
     e = 0.00001
-    if node.param.is_deconv and is_tf_backend:
-        weight = np.reshape(weight, (n_c, n_m, kernel_size[1], kernel_size[0]))
-        weight = np.transpose(weight, [1, 0, 2, 3])
     weight = np.reshape(weight, (n_m, n_c * kernel_size[1] * kernel_size[0]))
     for i in range(n_m):
         assert np.min(bn_var[i]) >= 0, "Invalid bn_var[%d]=%s" % (i, bn_var[i])
@@ -221,11 +218,10 @@ def get_kernel_size_for_weight(node):
     return (p, p)
 
 
-def pack_conv_weight(node, of, quantization, transweight, is_tensorflow=False):
+def pack_conv_weight(node, of, quantization, transweight):
     logging.info('Packing weight for node: %s.', node.name)
     if node.param.dilation[0] == 1 and node.param.dilation[1] == 1:
-        _pack_conv_weight_nondil(node, of, quantization, transweight,
-                                 is_tensorflow)
+        _pack_conv_weight_nondil(node, of, quantization, transweight)
     else:
         _pack_conv_weight_dil(node, of, quantization, transweight)
 
@@ -329,8 +325,7 @@ def _pack_conv_weight_dil(node, of, quantization, transweight):
         offs += pad
 
 
-def _pack_conv_weight_nondil(node, of, quantization, transweight,
-                             is_tf_backend):
+def _pack_conv_weight_nondil(node, of, quantization, transweight):
     n_c = node.input_dim[2]
     if node.param.group > 1:
         n_c = n_c // node.param.group
@@ -352,11 +347,7 @@ def _pack_conv_weight_nondil(node, of, quantization, transweight,
         node.set_weight_bias(weight, bias)
 
     if node.bn_node is not None or node.sc_node is not None:
-        weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m,
-                                      is_tf_backend)
-    elif node.param.is_deconv and is_tf_backend:
-        weight = np.reshape(weight, (n_c, n_m, kernel_size[1], kernel_size[0]))
-        weight = np.transpose(weight, [1, 0, 2, 3])
+        weight, bias = merge_bn_scale(node, kernel_size, n_c, n_m)
     if node.act_node and node.act_node.type == NodeType.PReLU:
         prelu = node.act_node.weight
     else:
@@ -376,8 +367,6 @@ def _pack_conv_weight_nondil(node, of, quantization, transweight,
     buffer = np.zeros(shape=(12, 6), dtype=weight_type)
 
     labels.shape = (n_m, n_c, kernel_size[1], kernel_size[0])
-    if node.param.is_deconv:
-        labels = labels[:, :, ::-1, ::-1]
 
     if quantization:
         centers.tofile(of)
@@ -1109,6 +1098,23 @@ class FPGANetwork(object):
                     logging.error(msg)
                     raise cnn_exception.ConvertError(msg)
 
+    @staticmethod
+    def _reformant_deconv_weight(node, is_tf_backend):
+        if node.param.is_deconv:
+            weight = node.weight
+            kernel_size = node.param.kernel_size
+            n_c = node.input_dim[2]
+            n_m = node.output_dim[2]
+            if is_tf_backend:
+                weight = np.reshape(weight,
+                                    (n_c, n_m, kernel_size[1], kernel_size[0]))
+                weight = np.transpose(weight, [1, 0, 2, 3])
+            else:
+                weight = np.reshape(weight,
+                                    (n_m, n_c, kernel_size[1], kernel_size[0]))
+            weight = weight[:, :, ::-1, ::-1]
+            node.weight = weight
+
     def pad_weight_matrix(self, conv_node):
         filter_sizew = conv_node.param.kernel_size[0]
         filter_sizeh = conv_node.param.kernel_size[1]
@@ -1122,10 +1128,7 @@ class FPGANetwork(object):
             m = conv_node.output_dim[2]
             weight = conv_node.weight
             weight.shape = (m, c, filter_sizeh, filter_sizew)
-            pad_width = ((0, 0), (0, 0)) +\
-                        (((0, padh), (padw, 0))
-                         if conv_node.param.is_deconv
-                         else ((padh, 0), (0, padw)))
+            pad_width = ((0, 0), (0, 0), (0, padh), (padw, 0))
             weight = np.pad(weight, pad_width, 'constant')
             conv_node.weight = weight
 
@@ -1144,8 +1147,8 @@ class FPGANetwork(object):
             else:
                 prev_node_type = None
             if node.type in (NodeType.Convolution, NodeType.InnerProduct):
+                self._reformant_deconv_weight(node, net.tensorflow_backend)
                 self.pad_weight_matrix(node)
-                pass
             elif node.type is NodeType.Pooling:
                 # Test if the pool node can merge with previous convolution node
                 if (prev_node_type == NodeType.Convolution and
@@ -1467,8 +1470,7 @@ class FPGANetwork(object):
                             run.conv.type in (NodeType.Convolution,
                                               NodeType.InnerProduct)):
                         pack_conv_weight(run.conv, of, self.quantization,
-                                         self.transweight,
-                                         self.tensorflow_backend)
+                                         self.transweight)
 
     def output_network(self, output_folder: str, network_name: str,
                        gensrc: bool, gendoc: bool, gengraph: bool,
@@ -1495,3 +1497,4 @@ class FPGANetwork(object):
                                   graphviz_path, self)
         with open(weight_file_name, "wb") as bf:
             self.output_weights(bf)
+
