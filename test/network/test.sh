@@ -95,7 +95,7 @@ do
     verbose_print "quantization: $quant"
     verbose_print "transpose_weight: $transweight"
     change_quant_transweight $ini $quant $transweight
-    python3 ../../convertor.py $ini
+    python3 ../../convertor.py $ini --cv2_seed 0
 
     gen_src=$m/${m}_gen.cpp
     gen_hdr=$m/${m}_gen.h

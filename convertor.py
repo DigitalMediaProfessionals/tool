@@ -27,6 +27,7 @@ import argparse
 import os
 import configparser
 import logging
+import cv2
 from importlib import import_module
 from cnn_convertor import cnn_parser, fpga_layer
 from cnn_convertor import pywrapper as pyw
@@ -40,6 +41,8 @@ parser.add_argument("INPUT_INI", type=str, help="Input ini file")
 parser.add_argument("--max_kernel_size", type=int, default=7,
                     help="Maximum supported kernel size for "
                     "Convolutional Layer")
+parser.add_argument("--cv2_seed", type=int, default=None,
+                    help="Random seed for python-opencv")
 parser.add_argument("--ub_size", type=int, default=655360,
                     help="Unified Buffer Size in bytes")
 args = parser.parse_args()
@@ -48,6 +51,8 @@ args = parser.parse_args()
 # Set limits
 fpga_layer.set_max_kernel_size(args.max_kernel_size)
 fpga_layer.set_ub_size(args.ub_size)
+if args.cv2_seed:
+    cv2.setRNGSeed(args.cv2_seed)
 
 
 # Parse config file
