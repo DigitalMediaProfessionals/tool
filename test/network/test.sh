@@ -6,8 +6,8 @@ change_quant_transweight() {
   local ini=$1
   local quantization=$2
   local transweight=$3
-  sed -i "s/quantization \\*= \\*[01]/quantization = $quantization/" $1
-  sed -i "s/transpose_weight \\*= \\*[01]/transpose_weight = $transweight/" $1
+  sed -i "s/quantization *= *[01]/quantization = $quantization/" $1
+  sed -i "s/transpose_weight *= *[01]/transpose_weight = $transweight/" $1
 }
 
 usage() {
