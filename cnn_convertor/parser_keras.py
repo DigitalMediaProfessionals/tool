@@ -125,6 +125,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
     netarg_dict["debug_node"] = netweight
 
     # get data_format parameter
+    is_channel_first = True
     for layer in layers:
         if 'data_format' in layer['config']:
             if layer['config']['data_format'] == 'channels_first':
@@ -404,7 +405,9 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
             global_input_nodes.append(node)
             shape = config['batch_input_shape']
             # handle 1D input dimensions
-            if len(shape) == 3:
+            if len(shape) == 2:
+                dim = (1, 1, shape[1])
+            elif len(shape) == 3:
                 if is_channel_first:
                     dim = (shape[2], 1, shape[1])
                 else:
