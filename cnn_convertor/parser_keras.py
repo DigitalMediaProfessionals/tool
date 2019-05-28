@@ -127,9 +127,13 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
     # get data_format parameter
     is_channel_first = True
     for layer in layers:
-        if 'data_format' in layer['config']:
-            if layer['config']['data_format'] == 'channels_first':
-                is_channel_first = True
+        layer_type = layer['class_name']
+        if type_map[layer_type] is NodeType.Convolution:
+            if 'data_format' in layer['config']:
+                if layer['config']['data_format'] == 'channels_first':
+                    is_channel_first = True
+                else:
+                    is_channel_first = False
             else:
                 is_channel_first = False
             break
