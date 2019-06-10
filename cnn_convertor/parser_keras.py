@@ -128,15 +128,16 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
     is_channel_first = True
     for layer in layers:
         layer_type = layer['class_name']
-        if type_map[layer_type] in (NodeType.Convolution, NodeType.Pooling):
-            if 'data_format' in layer['config']:
-                if layer['config']['data_format'] == 'channels_first':
-                    is_channel_first = True
+        if layer_type in type_map:
+            if type_map[layer_type] in (NodeType.Convolution, NodeType.Pooling):
+                if 'data_format' in layer['config']:
+                    if layer['config']['data_format'] == 'channels_first':
+                        is_channel_first = True
+                    else:
+                        is_channel_first = False
                 else:
                     is_channel_first = False
-            else:
-                is_channel_first = False
-            break
+                break
 
     node_map = OrderedDict()
     # Handle each layer node
@@ -148,7 +149,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
                       i, layer_name, layer_type)
 
         # if the first node is not input node, create a dummy input node
-        if i == 0 and layer_type != 'InputLayer':
+        if i == 0 and layer_type not in ['InputLayer', 'Layer']:
             node = cnn_layer.LayerNode('Input', NodeType.Input, None)
             global_input_nodes.append(node)
             shape = config['batch_input_shape']
@@ -170,7 +171,10 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
             node_map[""] = node
 
         if is_sequential:
-            input_nodes = list(node_map.values())[-1]
+            if i > 0:
+                input_nodes = list(node_map.values())[-1]
+            else:
+                input_nodes = []
         else:
             # search for exsisting input and output nodes
             input_nodes = []
