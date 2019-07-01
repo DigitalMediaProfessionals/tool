@@ -171,7 +171,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
             node_map[""] = node
 
         if is_sequential:
-            if i > 0:
+            if len(node_map) > 0:
                 input_nodes = list(node_map.values())[-1]
             else:
                 input_nodes = []
