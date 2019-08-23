@@ -254,11 +254,14 @@ def parse_caffe_data(
                 layer.type is not NodeType.InnerProduct):
             continue
         caffe_layer = search_caffe_layer(layers, layer.name)
-        weight = np.float32(caffe_layer.blobs[0].data)
+        if len(caffe_layer.blobs) > 0:
+            weight = np.float32(caffe_layer.blobs[0].data)
+        else:
+            weight = None
         if len(caffe_layer.blobs) > 1:
             bias = np.float32(caffe_layer.blobs[1].data)
         else:
-            bias = np.zeros((layer.output_dim[2]))
+            bias = None
         layer.set_weight_bias(weight, bias)
 
         # set parameters for BatchNorm node and Scale node
