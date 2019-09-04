@@ -143,6 +143,10 @@ def calc_pool_tiles(node):
 def merge_bn_scale(node, kernel_size, n_c, n_m):
     weight = node.weight
     bias = node.bias
+    if node.bn_node is not None:
+        e = node.bn_node.param.epsilon
+    else:
+        e = 0.00001
     if node.bn_node is not None and node.bn_node.mean is not None:
         bn_mean = node.bn_node.mean
     else:
@@ -150,7 +154,7 @@ def merge_bn_scale(node, kernel_size, n_c, n_m):
     if node.bn_node is not None and node.bn_node.var is not None:
         bn_var = node.bn_node.var
     else:
-        bn_var = np.full_like(bias, 1.0 - 0.00001)
+        bn_var = np.full_like(bias, 1.0 - e)
     if node.sc_node is not None and node.sc_node.weight is not None:
         sc_weight = node.sc_node.weight
     else:
@@ -159,7 +163,6 @@ def merge_bn_scale(node, kernel_size, n_c, n_m):
         sc_bias = node.sc_node.bias
     else:
         sc_bias = np.zeros_like(bias)
-    e = 0.00001
     weight = np.reshape(weight, (n_m, n_c * kernel_size[1] * kernel_size[0]))
     for i in range(n_m):
         assert np.min(bn_var[i]) >= 0, "Invalid bn_var[%d]=%s" % (i, bn_var[i])

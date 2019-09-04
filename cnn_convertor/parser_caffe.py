@@ -127,6 +127,10 @@ def parse_caffe_def2(netdef: str):
                     param = cnn_layer.NodeParam()
                     param.relu_param = layer.relu_param.negative_slope
                     node.param = param
+                elif node_type == NodeType.BatchNorm:
+                    param = cnn_layer.NodeParam()
+                    param.epsilon = layer.batch_norm_param.eps
+                    node.param = param
                 top_map[layer.top[0]] = node
                 continue
 
