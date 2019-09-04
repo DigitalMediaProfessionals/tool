@@ -257,6 +257,9 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
         elif layer_type == 'BatchNormalization':
             node = cnn_layer.LayerNode(layer_name, NodeType.BatchNorm,
                                        input_nodes)
+            param = cnn_layer.NodeParam()
+            param.epsilon = config['epsilon']
+            node.param = param
             if netweight is not None:
                 weights = get_weights(netweight, layer_name, need_flip,
                                       ['gamma', 'beta',

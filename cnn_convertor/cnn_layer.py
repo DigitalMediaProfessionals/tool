@@ -91,6 +91,7 @@ class NodeParam(object):
         self.axis = -1
         self.custom_param = None
         self.scale = 1.0
+        self.epsilon = 0.00001
         self.split_pool_divisor = None
         self._dilation = [1, 1]
         self.is_deconv = False
@@ -466,6 +467,7 @@ class Network(object):
                              if create_dummy else _in)
 
                 bn_node = LayerNode(node.name, NodeType.BatchNorm)
+                bn_node.param = node.param
                 bn_node.set_mean_var(node.mean, node.var)
                 base_node.bn_node = bn_node
                 if node.weight is not None or node.bias is not None:
