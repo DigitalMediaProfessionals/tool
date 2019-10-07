@@ -27,7 +27,6 @@ NodeType = cnn_layer.NodeType
 
 def set_inplace_node(node, config):
     activation = config['activation']
-    input_node = None
     if activation == 'relu':
         node_type = NodeType.ReLU
     elif activation == 'tanh':
@@ -38,14 +37,9 @@ def set_inplace_node(node, config):
         node_type = NodeType.ELU
     elif activation == 'softmax':
         node_type = NodeType.SoftMax
-        input_node = node
     in_node = cnn_layer.LayerNode(node.name + '_' + activation,
-                                  node_type, input_node)
-    if input_node is None:
-        node.act_node = in_node
-        return None
-    else:
-        return in_node
+                                  node_type, node)
+    return in_node
 
 
 def get_weights(netweight, layer_name, need_flip, weight_entry):
@@ -470,7 +464,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
             if config['activation'] != 'linear':
                 inplace_node = set_inplace_node(list(node_map.values())[-1], config)
                 if inplace_node:
-                    node_map[inplace_node.name] = inplace_node
+                    node_map[layer_name] = inplace_node
             if netweight is not None:
                 if layer_type[:-2] == 'SeparableConv':
                     weights = get_weights(netweight, layer_name, need_flip,
@@ -516,7 +510,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
             if config['activation'] != 'linear':
                 inplace_node = set_inplace_node(node, config)
                 if inplace_node:
-                    node_map[inplace_node.name] = inplace_node
+                    node_map[layer_name] = inplace_node
             if netweight is not None:
                 weights = get_weights(netweight, layer_name, need_flip,
                                       ['kernel', 'bias'])
