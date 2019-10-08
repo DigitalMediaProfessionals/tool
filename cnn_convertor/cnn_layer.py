@@ -463,6 +463,7 @@ class Network(object):
                                 (_in.type is NodeType.Convolution
                                  and len(_in.output_nodes) == 1
                                  and _in.bn_node is None
+                                 and _in.sc_node is None
                                  and _in.act_node is None))
                 base_node = (_create_dummy_conv_node(node)
                              if create_dummy else _in)
