@@ -914,7 +914,7 @@ def gen_source_layer(of, name, n, layer, quantization, transweight):
     elif layer.type is LayerType.Custom:
         of.write('  layer.custom_proc_ptr = &custom_callback_{0};\n'.format(layer.node_in.param.custom_param[2]))
         of.write('  layer.custom_param = &custom_param;\n')
-    elif layer.type is LayerType.CopyConcatenate:
+    elif layer.type is LayerType.CopyConcatenate or layer.type is LayerType.FoPooling:
         of.write('  layer.input_layer_num = {0};\n'.format(len(layer.layer_in)))
         of.write('  layer.input_layers = input_layers;\n')
     if layer.is_output:
