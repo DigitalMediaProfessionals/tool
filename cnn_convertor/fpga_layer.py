@@ -818,6 +818,8 @@ def _is_input_hw_layout(layer):
     for inl in layer.layer_in:
         if inl.type is LayerType.Convolution:
             return True
+        elif inl.type is LayerType.FoPooling:
+            return True
         elif inl.type is LayerType.Concatenate:
             if _is_input_hw_layout(inl):
                 return True
@@ -834,6 +836,7 @@ def gen_source_layer(of, name, n, layer, quantization, transweight):
                 LayerType.Concatenate: 'LT_CONCAT',
                 LayerType.CopyConcatenate: 'LT_COPY_CONCAT',
                 LayerType.SoftMax: 'LT_SOFTMAX',
+                LayerType.FoPooling: 'LT_FO_POOLING',
                 LayerType.Custom: 'LT_CUSTOM'}
 
     if layer.type is LayerType.Convolution:
@@ -850,6 +853,8 @@ def gen_source_layer(of, name, n, layer, quantization, transweight):
             of.write('//Layer_{0}: Flatten Layer\n'.format(n))
         elif layer.type is LayerType.SoftMax:
             of.write('//Layer_{0}: SoftMax Layer\n'.format(n))
+        elif layer.type is LayerType.FoPooling:
+            of.write('//Layer_{0}: Fo-Pooling Layer\n'.format(n))
         else:
             of.write('//Layer_{0}: Custom Layer\n'.format(n))
         node = layer.node_in
@@ -872,7 +877,7 @@ def gen_source_layer(of, name, n, layer, quantization, transweight):
             else:
                 of.write('    {0},\n'.format(param))
         of.write('  };\n\n')
-    elif layer.type is LayerType.CopyConcatenate:
+    elif layer.type is LayerType.CopyConcatenate or layer.type is LayerType.FoPooling:
         of.write('  static fpga_layer *input_layers[] = {\n')
         for layer_in in layer.layer_in:
             of.write('    &layers_[{0}],\n'.format(layer_in.index))
@@ -931,6 +936,7 @@ class LayerType(IntEnum):
     Concatenate = auto()
     CopyConcatenate = auto()
     SoftMax = auto()
+    FoPooling = auto()
     Custom = auto()
     Other = auto()
 
@@ -1005,6 +1011,8 @@ class FPGALayer(object):
                         self.type = LayerType.Concatenate
             elif node.type is NodeType.SoftMax:
                 self.type = LayerType.SoftMax
+            elif node.type is NodeType.FoPooling:
+                self.type = LayerType.FoPooling
             elif node.type is NodeType.Custom:
                 self.type = LayerType.Custom
         if run.conv or run.pool:
@@ -1194,6 +1202,8 @@ class FPGANetwork(object):
             elif node.type is NodeType.Input:
                 pass
             elif node.type is NodeType.SoftMax:
+                pass
+            elif node.type is NodeType.FoPooling:
                 pass
             else:
                 ignore = True

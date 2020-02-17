@@ -69,7 +69,6 @@ def get_weights(netweight, layer_name, need_flip, weight_entry):
                 w = np.transpose(w, (2, 1, 0))
             if len(shape) == 2:
                 w = np.transpose(w)
-            w = w.reshape((-1,))
         else:
             w = None
         weights.append(w)
@@ -372,6 +371,50 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
                 node_type = NodeType.Eltwise
         elif layer_type == 'Layer' and 'batch_input_shape' in config:
             node_type = NodeType.Input
+        elif layer_type == 'QRNN':
+            param = cnn_layer.NodeParam()
+            param.num_output = config['units']
+            param.kernel_size = (config['window_size'], 1)
+            param.stride = (config['stride'], 1)
+            param.pad_lrtb = (2, 0, 0, 0)
+            activation = config['activation']
+            weights = get_weights(netweight, layer_name, need_flip,
+                      ['kernel', 'bias'])
+            z_node = cnn_layer.LayerNode(layer_name + '_z', NodeType.Convolution,
+                                         input_nodes)
+            z_node.param = param
+            z_node.set_weight_bias(weights[0][0:param.num_output,:,:,:],
+                                   weights[1][0:param.num_output])
+            if activation == 'relu':
+                act_node_type = NodeType.ReLU
+            elif activation == 'tanh':
+                act_node_type = NodeType.TanH
+            elif activation == 'sigmoid':
+                act_node_type = NodeType.Sigmoid
+            elif activation == 'elu':
+                act_node_type = NodeType.ELU
+            elif activation == 'softmax':
+                act_node_type = NodeType.SoftMax
+            z_act_node = cnn_layer.LayerNode(layer_name + '_z_act', act_node_type,
+                                             z_node)
+            f_node = cnn_layer.LayerNode(layer_name + '_f', NodeType.Convolution,
+                                         input_nodes)
+            f_node.param = param
+            f_node.set_weight_bias(weights[0][param.num_output:param.num_output * 2,:,:,:],
+                                   weights[1][param.num_output:param.num_output * 2])
+            f_act_node = cnn_layer.LayerNode(layer_name + '_f_act', NodeType.Sigmoid,
+                                             f_node)
+            o_node = cnn_layer.LayerNode(layer_name + '_o', NodeType.Convolution,
+                                         input_nodes)
+            o_node.param = param
+            o_node.set_weight_bias(weights[0][param.num_output * 2:,:,:,:],
+                                   weights[1][param.num_output * 2:])
+            o_act_node = cnn_layer.LayerNode(layer_name + '_o_act', NodeType.Sigmoid,
+                                             o_node)
+            pool_node = cnn_layer.LayerNode(layer_name + '_fo_pool', NodeType.FoPooling,
+                                       [z_act_node, f_act_node, o_act_node])
+            node_map[layer_name] = pool_node
+            continue
         elif layer_type in custom_layer:
             custom_config = custom_layer[layer_type]
             # set parameter type if it is the first time

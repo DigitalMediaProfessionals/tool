@@ -67,6 +67,7 @@ class NodeType(IntEnum):
     Sigmoid = auto()
     ReLU6 = auto()
     Padding = auto()
+    FoPooling = auto()
 
     def __repr__(self):
         return '<%s.%s>' % (self.__class__.__name__, self.name)
@@ -834,6 +835,9 @@ class Network(object):
                 node.param.num_output = dim[-1] * node.param.group
                 node.param.group = dim[-1]
             if node.type == NodeType.Convolution:
+                # Workaround for 1D tensor
+                if len(dim) == 2:
+                    dim = dim[:1] + (1,) + dim[1:]
                 node.input_dim = dim
                 if len(dim) == 3:
                     dim = (get_output_xy(dim, node.param, False) +
