@@ -835,9 +835,6 @@ class Network(object):
                 node.param.num_output = dim[-1] * node.param.group
                 node.param.group = dim[-1]
             if node.type == NodeType.Convolution:
-                # Workaround for 1D tensor
-                if len(dim) == 2:
-                    dim = dim[:1] + (1,) + dim[1:]
                 node.input_dim = dim
                 if len(dim) == 3:
                     dim = (get_output_xy(dim, node.param, False) +
@@ -899,7 +896,16 @@ class Network(object):
                     flat_node = self.insert_flatten_node(node, dim)
                     dim = flat_node.output_dim
                 node.input_dim = dim
-                node.output_dim = node.param.reshape_param
+                # Workaround for 1D tensor
+                dim = node.param.reshape_param
+                if len(dim) == 2:
+                    dim = dim[:1] + (1,) + dim[1:]
+                node.output_dim = dim
+            elif node.type == NodeType.FoPooling:
+                node.input_dim = dim
+                if not node.param.custom_param:
+                    dim = (1,) + dim[1:]
+                node.output_dim = dim
             elif node.type == NodeType.Custom:
                 node.input_dim = dim
                 dim = node.param.custom_param[1](node.param.custom_param[0],

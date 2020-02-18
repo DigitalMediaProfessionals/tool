@@ -413,6 +413,9 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
                                              o_node)
             pool_node = cnn_layer.LayerNode(layer_name + '_fo_pool', NodeType.FoPooling,
                                        [z_act_node, f_act_node, o_act_node])
+            param = cnn_layer.NodeParam()
+            param.custom_param = config['return_sequences']
+            pool_node.param = param
             node_map[layer_name] = pool_node
             continue
         elif layer_type in custom_layer:
