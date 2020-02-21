@@ -903,8 +903,7 @@ class Network(object):
                 node.output_dim = dim
             elif node.type == NodeType.FoPooling:
                 node.input_dim = dim
-                if not node.param.custom_param:
-                    dim = (1,) + dim[1:]
+                dim = (1,) + dim[1:]
                 node.output_dim = dim
             elif node.type == NodeType.Custom:
                 node.input_dim = dim

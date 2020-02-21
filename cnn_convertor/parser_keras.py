@@ -118,7 +118,7 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
     netarg_dict["debug_node"] = netweight
 
     # get data_format parameter
-    is_channel_first = True
+    is_channel_first = False
     for layer in layers:
         layer_type = layer['class_name']
         if layer_type in type_map:
@@ -376,15 +376,17 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
             param.num_output = config['units']
             param.kernel_size = (config['window_size'], 1)
             param.stride = (config['stride'], 1)
-            param.pad_lrtb = (2, 0, 0, 0)
+            param.pad_lrtb = (1, 1, 0, 0)
             activation = config['activation']
             weights = get_weights(netweight, layer_name, need_flip,
                       ['kernel', 'bias'])
+            if weights[1] is None:
+                weights[1] = np.zeros((param.num_output * 3,))
             z_node = cnn_layer.LayerNode(layer_name + '_z', NodeType.Convolution,
                                          input_nodes)
             z_node.param = param
-            z_node.set_weight_bias(weights[0][0:param.num_output,:,:,:],
-                                   weights[1][0:param.num_output])
+            z_node.set_weight_bias(weights[0][param.num_output:param.num_output * 2],
+                                   weights[1][param.num_output:param.num_output * 2])
             if activation == 'relu':
                 act_node_type = NodeType.ReLU
             elif activation == 'tanh':
@@ -400,22 +402,19 @@ def parse_keras_network2(net_def, netweight, custom_layer, need_flip=False):
             f_node = cnn_layer.LayerNode(layer_name + '_f', NodeType.Convolution,
                                          input_nodes)
             f_node.param = param
-            f_node.set_weight_bias(weights[0][param.num_output:param.num_output * 2,:,:,:],
-                                   weights[1][param.num_output:param.num_output * 2])
+            f_node.set_weight_bias(weights[0][0:param.num_output],
+                                   weights[1][0:param.num_output])
             f_act_node = cnn_layer.LayerNode(layer_name + '_f_act', NodeType.Sigmoid,
                                              f_node)
             o_node = cnn_layer.LayerNode(layer_name + '_o', NodeType.Convolution,
                                          input_nodes)
             o_node.param = param
-            o_node.set_weight_bias(weights[0][param.num_output * 2:,:,:,:],
+            o_node.set_weight_bias(weights[0][param.num_output * 2:],
                                    weights[1][param.num_output * 2:])
             o_act_node = cnn_layer.LayerNode(layer_name + '_o_act', NodeType.Sigmoid,
                                              o_node)
             pool_node = cnn_layer.LayerNode(layer_name + '_fo_pool', NodeType.FoPooling,
                                        [z_act_node, f_act_node, o_act_node])
-            param = cnn_layer.NodeParam()
-            param.custom_param = config['return_sequences']
-            pool_node.param = param
             node_map[layer_name] = pool_node
             continue
         elif layer_type in custom_layer:
