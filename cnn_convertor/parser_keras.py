@@ -25,6 +25,15 @@ import numpy as np
 NodeType = cnn_layer.NodeType
 
 
+def get_h5_str_attr(h5_obj, attr_name):
+    attr_obj = h5_obj.attrs[attr_name]
+    if type(attr_obj) is str:
+        return attr_obj
+    elif type(attr_obj) is bytes:
+        return attr_obj.decode('utf-8')
+    raise cnn_exception.ParseError('Attr {} does not exist.'.format(attr_name))
+
+
 def set_inplace_node(node, config):
     activation = config['activation']
     if activation == 'relu':
@@ -577,12 +586,12 @@ def parse_keras_network(network_data, custom_layer):
             'Exception occurred while opening Input network: %s', e)
         raise
 
-    version = keras_net.attrs['keras_version'].decode('utf-8')
+    version = get_h5_str_attr(keras_net, 'keras_version')
     major_version = int(version[:version.find('.')])
     if major_version < 2:
         logging.error('Keras version (< 2.0.0) not supported.')
         raise cnn_exception.ParseError('Unsupported Keras version')
-    backend = keras_net.attrs['backend'].decode('utf-8')
+    backend = get_h5_str_attr(keras_net, 'backend')
     if backend == 'theano':
         need_flip = True
     elif backend == 'tensorflow':
