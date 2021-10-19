@@ -7,7 +7,7 @@ Python with version >= 3.6 is required to run this script.
 It also needs the following modules: `numpy`, `protobuf`, `h5py`, `jinja2` and `opencv-python`. Run the following command to install them:
 
 ```
-python -m pip install numpy protobuf h5py opencv-python jinja2
+python -m pip install numpy protobuf h5py==2.7.1 opencv-python jinja2
 ```
 
 or on Ubuntu 18.04:
