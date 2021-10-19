@@ -22,6 +22,12 @@ import json
 import numpy as np
 
 
+if h5py.__version__.startswith("3"):
+    import sys
+    print("[ERROR] Current h5py version is {}. Please use 2.7.1 .".format(h5py.__version__))
+    sys.exit(-1)
+
+
 NodeType = cnn_layer.NodeType
 
 
