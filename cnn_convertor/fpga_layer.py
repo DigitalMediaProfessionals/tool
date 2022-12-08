@@ -187,6 +187,7 @@ def calc_kmeans(weight):
     import cv2
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_COUNT, 10, 1e-6)
     flags = cv2.KMEANS_PP_CENTERS
+    weight = weight.astype(np.float32)
     compactness, labels, centers = cv2.kmeans(weight,
                                               clusters, None,
                                               criteria, 3, flags)
