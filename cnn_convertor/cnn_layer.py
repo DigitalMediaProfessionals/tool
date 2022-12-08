@@ -662,8 +662,8 @@ class Network(object):
 
             # set padding
             if param.keras_padding == "same":
-                ow = math.ceil(float(w) / param.stride[0])
-                oh = math.ceil(float(h) / param.stride[1])
+                ow = math.ceil(float(w) * param.stride[0])
+                oh = math.ceil(float(h) * param.stride[1])
 
                 # Increase padding if necessary
                 while get_deconv_out_width_floor(
