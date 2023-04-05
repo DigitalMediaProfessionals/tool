@@ -1136,7 +1136,10 @@ class FPGANetwork(object):
             m = conv_node.output_dim[2]
             weight = conv_node.weight
             weight.shape = (m, c, filter_sizeh, filter_sizew)
-            pad_width = ((0, 0), (0, 0), (padh, 0), (0, padw))
+            if not self.transweight:
+                pad_width = ((0, 0), (0, 0), (padh, 0), (0, padw))
+            else:
+                pad_width = ((0, 0), (0, 0), (0, padh), (padw, 0))
             weight = np.pad(weight, pad_width, 'constant')
             conv_node.weight = weight
 
